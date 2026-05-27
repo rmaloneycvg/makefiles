@@ -1,0 +1,32 @@
+# infisical.example
+# Secret names managed by Infisical for this project.
+# This file is committed to git. DO NOT add values.
+# Environment: dev
+#
+# To pull secrets locally: make pull-secrets INFISICAL_ENV=dev
+# To push secrets to cloud: make push-secrets INFISICAL_ENV=dev
+# To regenerate this file: make generate-manifest INFISICAL_ENV=dev
+#
+# --- Infrastructure ---
+# Azure subscription / AWS account identifiers
+SUBSCRIPTION_ID=
+TENANT_ID=
+ACCOUNT_ID=
+
+# --- Database ---
+# Connection string for primary database
+DATABASE_URL=
+# Admin credentials (stored in Key Vault / Secrets Manager)
+DB_ADMIN_PASSWORD=
+
+# --- API Keys ---
+# Application Insights / CloudWatch connection
+APP_INSIGHTS_CONN=
+# Service Bus / SQS connection string
+SERVICEBUS_CONN=
+
+# --- Auth ---
+# OAuth client ID for API gateway
+APIM_APP_CLIENT_ID=
+# Cognito / Entra ID pool identifiers
+COGNITO_POOL_ID=

@@ -388,6 +388,7 @@ All scripts use Python stdlib only — no pip dependencies required.
 
 ## Gotchas
 
+- **Secrets workflow**: See the [Infisical section](#secrets-workflow-infisical) below for how secrets flow between AWS Secrets Manager, Infisical, and your local dev environment.
 - **CloudFront distributions take 15-30 minutes to deploy** — `create-cloudfront` returns quickly but the distribution isn't usable until status is `Deployed`. Check with `aws cloudfront get-distribution --id <id>`.
 - **WAF scope for CloudFront must be `us-east-1`** — this is an AWS platform constraint, not a Makefile limitation. Regional API Gateway WAFs use their local region.
 - **ACM certs for CloudFront must be in `us-east-1`** — `request-cert` defaults to this. Override with `CERT_REGION=<region>` for API Gateway regional/edge certs.
@@ -435,3 +436,69 @@ All scripts use Python stdlib only — no pip dependencies required.
 | Azure Budget | AWS Budgets |
 | Deployment Slots | Lambda Aliases |
 | Azure Policy | Config Rules / SCPs |
+
+---
+
+## Secrets Workflow (Infisical)
+
+Secrets are managed through [Infisical](https://infisical.com) as the single source of truth during development. AWS Secrets Manager is the permanent store; Infisical is the developer interface.
+
+```mermaid
+flowchart LR
+    SM[AWS Secrets Manager<br/>permanent store]
+    INF[Infisical<br/>dev workspace]
+    LOCAL[Local env vars<br/>via Tilt / export]
+    MANIFEST[infisical.example<br/>committed to git]
+
+    SM -- "make pull-secrets" --> INF
+    INF -- "make push-secrets" --> SM
+    INF -- "make export-secrets" --> LOCAL
+    INF -- "make generate-manifest" --> MANIFEST
+```
+
+### Daily workflow
+
+```bash
+# Start of day: pull secrets from Secrets Manager into Infisical
+make pull-secrets INFISICAL_ENV=dev
+
+# Develop — secrets are available via:
+#   Option A: eval in shell
+eval $(make export-secrets INFISICAL_ENV=dev)
+#   Option B: pipe to .env for Tilt/docker-compose
+make export-secrets INFISICAL_ENV=dev > .env.secrets
+
+# If you add new secrets during development, they live in Infisical.
+# End of day: push back to Secrets Manager
+make push-secrets INFISICAL_ENV=dev
+
+# Keep the manifest up to date (commit this file)
+make generate-manifest INFISICAL_ENV=dev
+```
+
+### infisical.example
+
+Every project that uses secrets should have an `infisical.example` file committed to git. It contains secret **names only** (no values) with comments explaining each one. This serves as:
+
+1. Documentation of what secrets a project needs
+2. Onboarding guide for new developers
+3. Recovery reference if Secrets Manager or Infisical has issues
+
+Regenerate it anytime with `make generate-manifest`.
+
+### Prerequisites
+
+- Install Infisical CLI: `brew install infisical/tap/infisical` or [docs](https://infisical.com/docs/cli/overview)
+- Login: `infisical login`
+- Init project: `infisical init` (creates `.infisical.json` in your project root)
+
+### Makefile targets
+
+| Command | Direction | Description |
+|---------|-----------|-------------|
+| `pull-secrets` | Secrets Manager → Infisical | Import cloud secrets into Infisical |
+| `push-secrets` | Infisical → Secrets Manager | Export Infisical secrets to cloud |
+| `export-secrets` | Infisical → stdout | Print key=value pairs for shell eval |
+| `generate-manifest` | Infisical → infisical.example | Update the committed manifest |
+
+All accept `INFISICAL_ENV=<dev|staging|prod>` (default: dev).

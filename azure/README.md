@@ -459,6 +459,72 @@ Each script has a `--help` flag describing its usage. The Makefile invokes them 
 
 ---
 
+## Secrets Workflow (Infisical)
+
+Secrets are managed through [Infisical](https://infisical.com) as the single source of truth during development. Cloud vaults (Azure Key Vault) are the permanent store; Infisical is the developer interface.
+
+```mermaid
+flowchart LR
+    AKV[Azure Key Vault<br/>permanent store]
+    INF[Infisical<br/>dev workspace]
+    LOCAL[Local env vars<br/>via Tilt / export]
+    MANIFEST[infisical.example<br/>committed to git]
+
+    AKV -- "make pull-secrets" --> INF
+    INF -- "make push-secrets" --> AKV
+    INF -- "make export-secrets" --> LOCAL
+    INF -- "make generate-manifest" --> MANIFEST
+```
+
+### Daily workflow
+
+```bash
+# Start of day: pull secrets from Key Vault into Infisical
+make pull-secrets INFISICAL_ENV=dev
+
+# Develop — secrets are available via:
+#   Option A: eval in shell
+eval $(make export-secrets INFISICAL_ENV=dev)
+#   Option B: pipe to .env for Tilt/docker-compose
+make export-secrets INFISICAL_ENV=dev > .env.secrets
+
+# If you add new secrets during development, they live in Infisical.
+# End of day: push back to Key Vault
+make push-secrets INFISICAL_ENV=dev
+
+# Keep the manifest up to date (commit this file)
+make generate-manifest INFISICAL_ENV=dev
+```
+
+### infisical.example
+
+Every project that uses secrets should have an `infisical.example` file committed to git. It contains secret **names only** (no values) with comments explaining each one. This serves as:
+
+1. Documentation of what secrets a project needs
+2. Onboarding guide for new developers
+3. Recovery reference if Infisical or the cloud vault has issues
+
+Regenerate it anytime with `make generate-manifest`.
+
+### Prerequisites
+
+- Install Infisical CLI: `brew install infisical/tap/infisical` or [docs](https://infisical.com/docs/cli/overview)
+- Login: `infisical login`
+- Init project: `infisical init` (creates `.infisical.json` in your project root)
+
+### Makefile targets
+
+| Command | Direction | Description |
+|---------|-----------|-------------|
+| `pull-secrets` | Key Vault → Infisical | Import cloud secrets into Infisical |
+| `push-secrets` | Infisical → Key Vault | Export Infisical secrets to cloud |
+| `export-secrets` | Infisical → stdout | Print key=value pairs for shell eval |
+| `generate-manifest` | Infisical → infisical.example | Update the committed manifest |
+
+All accept `INFISICAL_ENV=<dev|staging|prod>` (default: dev).
+
+---
+
 ## Migrating to Terraform or Bicep
 
 This Makefile is ideal for bootstrapping, prototyping, and solo work. For team environments and compliance, consider exporting to infrastructure-as-code.

@@ -17,13 +17,33 @@ LAMBDA_ROUTING := python3 scripts/lambda_routing.py
 -include .env
 export
 
-# Common tags applied to all resources
-PROJECT_TAG ?= my-project
-ENV_TAG ?= dev
-TAGS = Key=Project,Value=$(PROJECT_TAG) Key=Environment,Value=$(ENV_TAG)
+# ---------- Naming Convention ----------
+# Pass PROJECT=<name> to all commands. Resource names are derived automatically.
+# Examples: make create-lambda PROJECT=proj1 n=api → fn-proj1-api
+#           make create-api-gw PROJECT=proj1 → agw-proj1
+PROJECT     ?= myapp
+AWS_REGION  ?= us-east-1
+ENV_TAG     ?= dev
 
-# Region
-AWS_REGION ?= us-east-1
+# Derived names (industry-standard prefixes)
+PROJECT_TAG      := $(PROJECT)
+TAGS              = Key=Project,Value=$(PROJECT_TAG) Key=Environment,Value=$(ENV_TAG)
+BUCKET_NAME      ?= st-$(PROJECT)$(if $(n),-$(n),)
+FUNC_NAME        ?= fn-$(PROJECT)$(if $(n),-$(n),)
+LAMBDA_ROLE_NAME ?= role-$(PROJECT)-lambda
+API_NAME         ?= agw-$(PROJECT)
+POOL_NAME        ?= auth-$(PROJECT)
+CLIENT_NAME      ?= app-$(PROJECT)
+DOMAIN_PREFIX    ?= $(PROJECT)
+VPC_NAME         ?= vnet-$(PROJECT)
+REDIS_NAME       ?= redis-$(PROJECT)
+DB_NAME          ?= sql-$(PROJECT)
+TABLE_NAME       ?= ddb-$(PROJECT)$(if $(n),-$(n),)
+SERVICEBUS_NAME  ?= sqs-$(PROJECT)
+BUDGET_NAME      ?= budget-$(PROJECT)
+CICD_USER        ?= sp-$(PROJECT)-cicd
+DB_SUBNET_GROUP  ?= dbsnet-$(PROJECT)
+CACHE_SUBNET_GROUP ?= csnet-$(PROJECT)
 
 ##@ Help
 
@@ -147,6 +167,7 @@ endif
 		--alias-name "alias/$(n)" \
 		--target-key-id $(KEY_ID) --region $(AWS_REGION)
 	@$(ENV_TOOL) set KMS_KEY_ID=$(KEY_ID)
+	$(update_manifest)
 	@echo "✓ Created KMS key: alias/$(n) ($(KEY_ID))"
 
 .PHONY: list-kms-keys
@@ -222,6 +243,7 @@ endif
 		echo "  Note: For production, prefer CloudFront + Origin Access Control (private bucket)."; \
 	fi
 	@$(ENV_TOOL) set BUCKET_NAME_$(use)=$(BUCKET_NAME)
+	$(update_manifest)
 	@echo "✓ Created S3 bucket: $(BUCKET_NAME) (env=$(env), use=$(use))"
 
 .PHONY: delete-s3
@@ -252,6 +274,7 @@ endif
 		--role-name $(LAMBDA_ROLE_NAME) \
 		--policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
 	@$(ENV_TOOL) set LAMBDA_ROLE_ARN=$(ROLE_ARN)
+	$(update_manifest)
 	@echo "✓ Created Lambda role: $(LAMBDA_ROLE_NAME) ($(ROLE_ARN))"
 
 .PHONY: create-lambda
@@ -279,6 +302,7 @@ endif
 		--region $(AWS_REGION)
 	$(eval FUNC_ARN := $(shell aws lambda get-function --function-name $(FUNC_NAME) --query Configuration.FunctionArn --output text --region $(AWS_REGION)))
 	@$(ENV_TOOL) set LAMBDA_ARN_$(FUNC_NAME)=$(FUNC_ARN)
+	$(update_manifest)
 	@echo "✓ Created Lambda: $(FUNC_NAME)"
 
 .PHONY: deploy-lambda
@@ -346,6 +370,7 @@ endif
 		--user-pool-tags Project=$(PROJECT_TAG),Environment=$(ENV_TAG) \
 		--query UserPool.Id --output text --region $(AWS_REGION)))
 	@$(ENV_TOOL) set COGNITO_POOL_ID=$(POOL_ID)
+	$(update_manifest)
 	@echo "✓ Created User Pool: $(POOL_NAME) ($(POOL_ID))"
 
 .PHONY: create-user-pool-client
@@ -376,6 +401,7 @@ endif
 			--query UserPoolClient.ClientId --output text --region $(AWS_REGION)); \
 	fi; \
 	$(ENV_TOOL) set COGNITO_CLIENT_ID=$$CLIENT_ID; \
+	$(update_manifest)
 	echo "✓ Created app client: $(CLIENT_NAME) ($$CLIENT_ID)"
 
 .PHONY: create-user-pool-domain
@@ -388,6 +414,7 @@ endif
 		--user-pool-id $(POOL_ID) \
 		--domain $(DOMAIN_PREFIX) --region $(AWS_REGION)
 	@$(ENV_TOOL) set COGNITO_DOMAIN=$(DOMAIN_PREFIX).auth.$(AWS_REGION).amazoncognito.com
+	$(update_manifest)
 	@echo "✓ Created domain: $(DOMAIN_PREFIX).auth.$(AWS_REGION).amazoncognito.com"
 
 .PHONY: create-cognito-groups
@@ -421,6 +448,7 @@ endif
 		--tags Project=$(PROJECT_TAG),Environment=$(ENV_TAG) \
 		--query ApiId --output text --region $(AWS_REGION)))
 	@$(ENV_TOOL) set API_GW_ID=$(API_ID)
+	$(update_manifest)
 	@echo "✓ Created HTTP API: $(API_NAME) ($(API_ID))"
 
 .PHONY: api-gw-add-authorizer
@@ -443,6 +471,7 @@ api-gw-add-authorizer: ## Add JWT authorizer pointing to Cognito
 		--query AuthorizerId --output text --region $(AWS_REGION)))
 	@rm -f .tmp-authorizer.json
 	@$(ENV_TOOL) set API_GW_AUTHORIZER_ID=$(AUTH_ID)
+	$(update_manifest)
 	@echo "✓ Created JWT authorizer: $(AUTH_ID)"
 
 .PHONY: api-gw-add-lambda
@@ -560,6 +589,7 @@ endif
 	@$(ENV_TOOL) set PUBLIC_SUBNET=$(PUB_SUBNET)
 	@$(ENV_TOOL) set PRIVATE_SUBNET_1=$(PRIV_SUBNET_1)
 	@$(ENV_TOOL) set PRIVATE_SUBNET_2=$(PRIV_SUBNET_2)
+	$(update_manifest)
 	@echo "✓ Created VPC: $(VPC_NAME) ($(VPC_ID))"
 	@echo "  Public:  $(PUB_SUBNET)"
 	@echo "  Private: $(PRIV_SUBNET_1), $(PRIV_SUBNET_2)"
@@ -622,6 +652,7 @@ endif
 		--query Distribution.Id --output text))
 	@$(ENV_TOOL) set CLOUDFRONT_DIST_ID=$(DIST_ID)
 	@$(ENV_TOOL) set CLOUDFRONT_OAC_ID=$(OAC_ID)
+	$(update_manifest)
 	@echo "✓ Created CloudFront distribution: $(DIST_ID)"
 	@echo "  Domain: $(shell aws cloudfront get-distribution --id $(DIST_ID) --query Distribution.DomainName --output text)"
 
@@ -636,6 +667,7 @@ create-waf: ## Create WAF WebACL with managed rules
 		--region us-east-1 \
 		--query Summary.ARN --output text))
 	@$(ENV_TOOL) set WAF_ACL_ARN=$(WAF_ARN)
+	$(update_manifest)
 	@echo "✓ Created WAF WebACL: $(WAF_ARN)"
 
 .PHONY: attach-waf
@@ -663,6 +695,7 @@ endif
 		--query CertificateArn --output text \
 		--region $(CERT_REGION)))
 	@$(ENV_TOOL) set ACM_CERT_ARN=$(CERT_ARN)
+	$(update_manifest)
 	@echo "✓ Requested certificate: $(CERT_ARN)"
 	@echo "  Validate via DNS: aws acm describe-certificate --certificate-arn $(CERT_ARN) --region $(CERT_REGION) --query Certificate.DomainValidationOptions"
 
@@ -894,6 +927,7 @@ endif
 		--tags Key=Project,Value=$(PROJECT_TAG) \
 		--region $(AWS_REGION)
 	@$(ENV_TOOL) set DB_SUBNET_GROUP=$(DB_SUBNET_GROUP)
+	$(update_manifest)
 	@echo "✓ Created DB subnet group: $(DB_SUBNET_GROUP)"
 
 .PHONY: create-cache-subnet-group
@@ -912,6 +946,7 @@ endif
 		--subnet-ids $(PRIV_SUBNET_1) $(PRIV_SUBNET_2) \
 		--region $(AWS_REGION)
 	@$(ENV_TOOL) set CACHE_SUBNET_GROUP=$(CACHE_SUBNET_GROUP)
+	$(update_manifest)
 	@echo "✓ Created cache subnet group: $(CACHE_SUBNET_GROUP)"
 
 .PHONY: create-rds
@@ -1094,3 +1129,29 @@ backup-secrets: ## Backup all secrets to .backups/secrets/
 		done
 	@echo "✓ Backed up secrets to .backups/secrets/"
 
+
+##@ Infisical Secrets Workflow
+# Requires: infisical CLI installed + logged in (infisical login)
+# Set INFISICAL_ENV to match your Infisical environment slug (dev/staging/prod)
+INFISICAL_SYNC := python3 ../scripts/infisical_sync.py
+INFISICAL_ENV  ?= dev
+
+# Internal: auto-update manifest if infisical is available
+define update_manifest
+	@if command -v infisical >/dev/null 2>&1; then \
+		$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.example 2>/dev/null || true; \
+	fi
+endef
+
+.PHONY: pull-secrets push-secrets export-secrets generate-manifest
+pull-secrets: ## Pull secrets from AWS Secrets Manager → Infisical (env=dev|staging|prod)
+	@$(INFISICAL_SYNC) pull --provider aws --region $(AWS_REGION) --env $(INFISICAL_ENV)
+
+push-secrets: ## Push secrets from Infisical → AWS Secrets Manager (env=dev|staging|prod)
+	@$(INFISICAL_SYNC) push --provider aws --region $(AWS_REGION) --env $(INFISICAL_ENV)
+
+export-secrets: ## Export Infisical secrets to stdout (for eval or piping)
+	@$(INFISICAL_SYNC) export --env $(INFISICAL_ENV) --format dotenv
+
+generate-manifest: ## Generate infisical.example (secret names only, no values)
+	@$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.example

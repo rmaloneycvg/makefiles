@@ -15,36 +15,43 @@ ifneq (,$(wildcard .env))
 endif
 
 # ---------- Defaults (override via .env or CLI) ----------
-RG_NAME              ?= my-resource-group
+# Naming convention: <prefix>-<PROJECT>[-<suffix>]
+# Pass PROJECT=<name> to all commands. Resource names are derived automatically.
+# Examples: make create-rg PROJECT=proj1 → rg-proj1
+#           make create-funcapp PROJECT=proj1 n=api → fn-proj1-api
+PROJECT              ?= myapp
 LOCATION             ?= eastus
-KV_NAME              ?= my-keyvault
-STORAGE_NAME         ?= my-storage-account
-FUNC_NAME            ?= my-function-app
-LOG_ANALYTICS_NAME   ?= my-log-analytics
-APP_INSIGHTS_NAME    ?= my-app-insights
-APIM_NAME            ?= my-apim
+
+# Derived resource names (industry-standard prefixes)
+RG_NAME              ?= rg-$(PROJECT)
+KV_NAME              ?= kv-$(PROJECT)
+STORAGE_NAME         ?= st$(subst -,,$(PROJECT))
+FUNC_NAME            ?= fn-$(PROJECT)$(if $(n),-$(n),)
+LOG_ANALYTICS_NAME   ?= log-$(PROJECT)
+APP_INSIGHTS_NAME    ?= ai-$(PROJECT)
+APIM_NAME            ?= agw-$(PROJECT)
 APIM_SKU             ?= Consumption
-APIM_PUBLISHER_NAME  ?= MyOrg
+APIM_PUBLISHER_NAME  ?= $(PROJECT)
 APIM_PUBLISHER_EMAIL ?= admin@example.com
-APP_REG_NAME         ?= my-api-app
-VNET_NAME            ?= my-vnet
-SUBNET_FUNC          ?= subnet-functions
-SUBNET_PE            ?= subnet-private-endpoints
-FRONTDOOR_NAME       ?= my-frontdoor
+APP_REG_NAME         ?= app-$(PROJECT)
+VNET_NAME            ?= vnet-$(PROJECT)
+SUBNET_FUNC          ?= snet-func-$(PROJECT)
+SUBNET_PE            ?= snet-pe-$(PROJECT)
+FRONTDOOR_NAME       ?= fd-$(PROJECT)
 CUSTOM_DOMAIN        ?= www.example.com
-BUDGET_NAME          ?= monthly-budget
+BUDGET_NAME          ?= budget-$(PROJECT)
 BUDGET_AMOUNT        ?= 50
 BUDGET_EMAIL         ?= admin@example.com
-SERVICEBUS_NAME      ?= my-servicebus
-COSMOS_NAME          ?= my-cosmosdb
-COSMOS_DB_NAME       ?= my-database
-REDIS_NAME           ?= my-redis
-SQL_SERVER_NAME      ?= my-sql-server
-SQL_DB_NAME          ?= my-sql-db
+SERVICEBUS_NAME      ?= sb-$(PROJECT)
+COSMOS_NAME          ?= cosmos-$(PROJECT)
+COSMOS_DB_NAME       ?= db-$(PROJECT)
+REDIS_NAME           ?= redis-$(PROJECT)
+SQL_SERVER_NAME      ?= sql-$(PROJECT)
+SQL_DB_NAME          ?= sqldb-$(PROJECT)
 SQL_ADMIN_USER       ?= sqladmin
-SP_NAME              ?= sp-cicd
-WAF_POLICY_NAME      ?= my-waf-policy
-TAGS                 ?= team=backend project=myapp
+SP_NAME              ?= sp-$(PROJECT)-cicd
+WAF_POLICY_NAME      ?= waf-$(PROJECT)
+TAGS                 ?= team=backend project=$(PROJECT)
 
 # Env matrices for storage and function app
 STORAGE_SKU_dev      = Standard_LRS
@@ -79,6 +86,7 @@ create-rg: ## Create resource group and save IDs to .env
 		LOCATION=$(LOCATION) \
 		SUBSCRIPTION_ID=$$(az account show --query id -o tsv) \
 		TENANT_ID=$$(az account show --query tenantId -o tsv)
+	$(update_manifest)
 	@echo "✅ Resource group '$(RG_NAME)' ready. IDs saved to .env."
 
 list-rg: ## List all resource groups
@@ -93,6 +101,7 @@ delete-rg: ## Delete resource group (async)
 create-kv: ## Create Key Vault
 	az keyvault create --name $(KV_NAME) --resource-group $(RG_NAME) --location $(LOCATION)
 	@$(PY) $(SCRIPTS)/env_tool.py set KV_NAME=$(KV_NAME)
+	$(update_manifest)
 	@echo "✅ Key Vault '$(KV_NAME)' created."
 
 delete-kv: ## Soft-delete Key Vault
@@ -170,6 +179,7 @@ ifeq ($(use),web)
 		--404-document index.html
 endif
 	@$(PY) $(SCRIPTS)/env_tool.py set STORAGE_NAME=$(STORAGE_NAME)
+	$(update_manifest)
 	@echo "✅ Storage account '$(STORAGE_NAME)' created (env=$(env), use=$(use))."
 
 ##@ Function App
@@ -193,6 +203,7 @@ create-funcapp: ## Create Function App (env=, runtime=)
 		FUNC_NAME=$(FUNC_NAME) \
 		FUNC_HOSTNAME=$$(az functionapp show --name $(FUNC_NAME) --resource-group $(RG_NAME) --query defaultHostName -o tsv) \
 		FUNC_PRINCIPAL_ID=$$(az functionapp show --name $(FUNC_NAME) --resource-group $(RG_NAME) --query identity.principalId -o tsv)
+	$(update_manifest)
 	@echo "✅ Function App '$(FUNC_NAME)' created (env=$(env), runtime=$(runtime))."
 
 create-funcapp-insights: ## Connect Function App to Application Insights
@@ -224,6 +235,7 @@ create-app-insights: ## Create Log Analytics workspace + Application Insights
 		APP_INSIGHTS_NAME=$(APP_INSIGHTS_NAME) \
 		APP_INSIGHTS_KEY=$$(az monitor app-insights component show --app $(APP_INSIGHTS_NAME) --resource-group $(RG_NAME) --query instrumentationKey -o tsv) \
 		APP_INSIGHTS_CONN=$$(az monitor app-insights component show --app $(APP_INSIGHTS_NAME) --resource-group $(RG_NAME) --query connectionString -o tsv)
+	$(update_manifest)
 	@echo "✅ App Insights '$(APP_INSIGHTS_NAME)' created. Keys saved to .env."
 
 ##@ Entra ID (App Registration + Roles + Groups)
@@ -236,6 +248,7 @@ create-app-reg: ## Create Entra ID app registration, save client ID
 	@# Also create the service principal so role assignments work
 	@CLIENT_ID=$$(az ad app list --display-name $(APP_REG_NAME) --query '[0].appId' -o tsv); \
 		az ad sp create --id "$$CLIENT_ID" >/dev/null 2>&1 || true
+	$(update_manifest)
 	@echo "✅ App registration '$(APP_REG_NAME)' created."
 
 create-app-roles: ## Add Read/Write/Admin roles to app registration
@@ -268,6 +281,7 @@ create-apim: ## Create APIM instance and save gateway URL
 	@$(PY) $(SCRIPTS)/env_tool.py set \
 		APIM_NAME=$(APIM_NAME) \
 		APIM_GATEWAY_URL=$$(az apim show --name $(APIM_NAME) --resource-group $(RG_NAME) --query gatewayUrl -o tsv)
+	$(update_manifest)
 	@echo "✅ APIM '$(APIM_NAME)' created. Gateway URL saved to .env."
 
 apim-add-funcapp: ## Import Function App as API (requires swagger= URL or spec= file)
@@ -372,6 +386,7 @@ create-vnet: ## Create VNet with subnets for functions and private endpoints
 	@$(PY) $(SCRIPTS)/env_tool.py set \
 		VNET_NAME=$(VNET_NAME) SUBNET_FUNC=$(SUBNET_FUNC) SUBNET_PE=$(SUBNET_PE)
 	@echo "✅ VNet '$(VNET_NAME)' created with subnets."
+	$(update_manifest)
 
 vnet-integrate-funcapp: ## Integrate Function App with VNet
 	az functionapp vnet-integration add \
@@ -424,6 +439,7 @@ create-frontdoor: ## Create Front Door pointing at static website of storage
 		FRONTDOOR_ENDPOINT=$$(az afd endpoint show --endpoint-name $(FRONTDOOR_NAME)-ep --profile-name $(FRONTDOOR_NAME) --resource-group $(RG_NAME) --query hostName -o tsv)
 	@echo "✅ Front Door '$(FRONTDOOR_NAME)' created."
 
+	$(update_manifest)
 add-custom-domain: ## (Optional) Add custom domain with managed TLS
 	az afd custom-domain create \
 		--custom-domain-name $(subst .,-,$(CUSTOM_DOMAIN)) \
@@ -537,6 +553,7 @@ create-sql: ## Create Azure SQL server + database (env=dev|prod)
 	@echo "✅ SQL Server/DB created. Admin password stored in Key Vault as 'sql-admin-password'."
 
 ##@ Event Grid
+	$(update_manifest)
 .PHONY: create-eventgrid-sub
 create-eventgrid-sub: ## Blob events → Function App (n=<subscription-name>)
 	@if [ -z "$(n)" ]; then echo "❌ n=<subscription-name> (and function name) is required"; exit 1; fi
@@ -573,6 +590,7 @@ create-sp-cicd: ## Create service principal for CI/CD deployments
 
 ##@ Deployment Slots
 .PHONY: create-slot swap-slot
+	$(update_manifest)
 create-slot: ## Create a deployment slot (n=<slot-name>)
 	az functionapp deployment slot create --name $(FUNC_NAME) --resource-group $(RG_NAME) --slot $(n)
 
@@ -626,3 +644,55 @@ deploy-web: ## Deploy React build to static website (dir=<build-folder>)
 	az storage blob upload-batch \
 		--account-name $(STORAGE_NAME) --destination '$$web' \
 		--source $(dir) --overwrite
+
+##@ Infisical Secrets Workflow
+# Requires: infisical CLI installed + logged in (infisical login)
+# Set INFISICAL_ENV to match your Infisical environment slug (dev/staging/prod)
+INFISICAL_SYNC    := python3 ../scripts/infisical_sync.py
+INFISICAL_ENV     ?= dev
+INFISICAL_PREFIX  ?=
+
+INFISICAL_URL     ?= http://localhost:9999/api
+
+# Internal: auto-update manifest if infisical is available
+define update_manifest
+	@if command -v infisical >/dev/null 2>&1; then \
+		$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.example 2>/dev/null || true; \
+	fi
+endef
+
+.PHONY: push-env pull-secrets push-secrets export-secrets generate-manifest login-secrets setup-secrets
+push-env: ## Push .env key/value pairs to Infisical
+	@while IFS='=' read -r key value; do \
+		[ -z "$$key" ] || [ "$${key#\#}" != "$$key" ] && continue; \
+		infisical secrets set "$$key=$$value" --env $(INFISICAL_ENV)  --domain $(INFISICAL_URL) --silent; \
+		echo "  ✓ $$key"; \
+	done < .env
+	@echo "✅ .env pushed to Infisical project  ($(INFISICAL_ENV))."
+
+login-secrets: ## Log in to Infisical CLI (opens browser)
+	infisical login --domain $(INFISICAL_URL)
+
+setup-secrets: 
+	infisical init --domain $(INFISICAL_URL)
+
+purge-secrets: ## Delete all secrets from Infisical project environment
+	@infisical secrets --env $(INFISICAL_ENV) --domain $(INFISICAL_URL) --plain -o json 2>/dev/null | \
+		$(PY) -c "import sys,json;[print(s['secretKey']) for s in json.loads(sys.stdin.read())]" | \
+		while read -r key; do \
+			infisical secrets delete "$$key" --env $(INFISICAL_ENV) --domain $(INFISICAL_URL) --type shared --silent; \
+			echo "  🗑 $$key"; \
+		done
+	@echo "✅ All secrets purged from Infisical ($(INFISICAL_ENV))."
+
+pull-secrets: ## Pull secrets from Azure Key Vault → Infisical (env=dev|staging|prod)
+	@$(INFISICAL_SYNC) pull --provider azure --vault-name $(KV_NAME) --env $(INFISICAL_ENV)
+
+push-secrets: ## Push secrets from Infisical → Azure Key Vault (env=dev|staging|prod)
+	@$(INFISICAL_SYNC) push --provider azure --vault-name $(KV_NAME) --env $(INFISICAL_ENV)
+
+export-secrets: ## Export Infisical secrets to stdout (for eval or piping)
+	@$(INFISICAL_SYNC) export --env $(INFISICAL_ENV) --format dotenv
+
+generate-manifest: ## Generate infisical.example (secret names only, no values)
+	@$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.examp
