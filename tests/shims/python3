@@ -1,0 +1,14 @@
+#!/bin/bash
+echo "python3 $*" >> "${MOCK_LOG:-/tmp/mock_commands.log}"
+# For scripts that produce output
+case "$*" in
+  *"env_tool.py"*) ;; # no output needed
+  *"budget_helper.py start-date"*) echo "2026-06-01" ;;
+  *"budget_helper.py end-date"*) echo "2027-06-01" ;;
+  *"budget_helper.py"*) echo '{}' ;;
+  *"storage_web_endpoint.py"*) echo "mock.z13.web.core.windows.net" ;;
+  *"policy_defs.py"*) echo "/providers/Microsoft.Authorization/policyDefinitions/mock-id" ;;
+  *"infisical_sync.py"*) ;; # no output needed
+  *) echo "" ;;
+esac
+exit 0

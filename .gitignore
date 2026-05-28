@@ -1,5 +1,5 @@
 # Python-generated files
-**/__pycache__/
+**/__pycache__
 *.py[oc]
 
 **/build
@@ -9,13 +9,16 @@
 *~
 *.swp
 *.swo
-
+.venv
+__pycache__
+.pytest_cache
 
 # Virtual environments
 **/.venv
 **/output_scripts
 **/schema_export
 **/.env
+**/.infisical.json
 
 **/node_modules
 

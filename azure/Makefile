@@ -5,8 +5,17 @@
 
 # ---------- Config ----------
 SHELL := /bin/bash
-PY    := python3
-SCRIPTS := scripts
+PY             ?= python3
+SCRIPTS        ?= $(HOME)/workspace/makefiles/azure/scripts
+INFISICAL_SYNC ?= $(PY) $(HOME)/workspace/makefiles/scripts/infisical_sync.py
+INFISICAL_ENV  ?= dev
+
+# Auto-update infisical.example manifest after changes
+define update_manifest
+	@if command -v infisical >/dev/null 2>&1; then \
+		$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.example 2>/dev/null || true; \
+	fi
+endef
 
 # Load .env if present (auto-exported for az CLI)
 ifneq (,$(wildcard .env))
@@ -78,8 +87,8 @@ help: ## Show this help
 		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(MAKEFILE_LIST)
 
 ##@ Resource Group
-.PHONY: create-rg list-rg delete-rg
-create-rg: ## Create resource group and save IDs to .env
+.PHONY: az-create-rg az-list-rg az-delete-rg
+az-create-rg: ## Create resource group and save IDs to .env
 	az group create --name $(RG_NAME) --location $(LOCATION) -o table
 	@$(PY) $(SCRIPTS)/env_tool.py set \
 		RG_NAME=$(RG_NAME) \
@@ -89,76 +98,76 @@ create-rg: ## Create resource group and save IDs to .env
 	$(update_manifest)
 	@echo "✅ Resource group '$(RG_NAME)' ready. IDs saved to .env."
 
-list-rg: ## List all resource groups
+az-list-rg: ## List all resource groups
 	az group list -o table
 
-delete-rg: ## Delete resource group (async)
+az-delete-rg: ## Delete resource group (async)
 	az group delete --name $(RG_NAME) --yes --no-wait
 	@echo "🗑  Deletion initiated for '$(RG_NAME)'."
 
 ##@ Key Vault
-.PHONY: create-kv delete-kv purge-kv
-create-kv: ## Create Key Vault
+.PHONY: az-create-kv az-delete-kv az-purge-kv
+az-create-kv: ## Create Key Vault
 	az keyvault create --name $(KV_NAME) --resource-group $(RG_NAME) --location $(LOCATION)
 	@$(PY) $(SCRIPTS)/env_tool.py set KV_NAME=$(KV_NAME)
 	$(update_manifest)
 	@echo "✅ Key Vault '$(KV_NAME)' created."
 
-delete-kv: ## Soft-delete Key Vault
+az-delete-kv: ## Soft-delete Key Vault
 	az keyvault delete --name $(KV_NAME) --resource-group $(RG_NAME)
 
-purge-kv: ## Permanently purge a soft-deleted Key Vault
+az-purge-kv: ## Permanently purge a soft-deleted Key Vault
 	az keyvault purge --name $(KV_NAME) --location $(LOCATION)
 
 ##@ Key Vault Secrets
-.PHONY: add-secret-kv list-secrets-kv show-secret-kv delete-secret-kv purge-secret-kv
-add-secret-kv: ## Set a secret (n=<name> v=<value>)
+.PHONY: az-add-secret-kv az-list-secrets-kv az-show-secret-kv az-delete-secret-kv az-purge-secret-kv
+az-add-secret-kv: ## Set a secret (n=<name> v=<value>)
 	az keyvault secret set --vault-name $(KV_NAME) --name "$(n)" --value "$(v)"
 
-list-secrets-kv: ## List all secrets
+az-list-secrets-kv: ## List all secrets
 	az keyvault secret list --vault-name $(KV_NAME) -o table
 
-show-secret-kv: ## Show a secret value (n=<name>)
+az-show-secret-kv: ## Show a secret value (n=<name>)
 	az keyvault secret show --vault-name $(KV_NAME) --name $(n) --query value -o tsv
 
-delete-secret-kv: ## Soft-delete a secret (n=<name>)
+az-delete-secret-kv: ## Soft-delete a secret (n=<name>)
 	az keyvault secret delete --vault-name $(KV_NAME) --name $(n)
 
-purge-secret-kv: ## Purge a soft-deleted secret (n=<name>)
+az-purge-secret-kv: ## Purge a soft-deleted secret (n=<name>)
 	az keyvault secret purge --vault-name $(KV_NAME) --name $(n)
 
 ##@ Key Vault Keys
-.PHONY: add-key-kv list-keys-kv show-key-kv delete-key-kv purge-key-kv
-add-key-kv: ## Create a key (n=<name>)
+.PHONY: az-add-key-kv az-list-keys-kv az-show-key-kv az-delete-key-kv az-purge-key-kv
+az-add-key-kv: ## Create a key (n=<name>)
 	az keyvault key create --vault-name $(KV_NAME) --name $(n) --protection software
 
-list-keys-kv: ## List all keys
+az-list-keys-kv: ## List all keys
 	az keyvault key list --vault-name $(KV_NAME) -o table
 
-show-key-kv: ## Show key details (n=<name>)
+az-show-key-kv: ## Show key details (n=<name>)
 	az keyvault key show --vault-name $(KV_NAME) --name $(n)
 
-delete-key-kv: ## Soft-delete a key (n=<name>)
+az-delete-key-kv: ## Soft-delete a key (n=<name>)
 	az keyvault key delete --vault-name $(KV_NAME) --name $(n)
 
-purge-key-kv: ## Purge a soft-deleted key (n=<name>)
+az-purge-key-kv: ## Purge a soft-deleted key (n=<name>)
 	az keyvault key purge --vault-name $(KV_NAME) --name $(n)
 
 ##@ .env Backup/Restore via Key Vault
-.PHONY: backup-env restore-env
-backup-env: ## Upload .env contents to Key Vault as secret 'env-backup'
+.PHONY: az-backup-env az-restore-env
+az-backup-env: ## Upload .env contents to Key Vault as secret 'env-backup'
 	az keyvault secret set --vault-name $(KV_NAME) --name env-backup --file .env >/dev/null
 	@echo "✅ .env backed up to Key Vault '$(KV_NAME)'."
 
-restore-env: ## Restore .env from Key Vault secret 'env-backup'
+az-restore-env: ## Restore .env from Key Vault secret 'env-backup'
 	@az keyvault secret show --vault-name $(KV_NAME) --name env-backup --query value -o tsv | \
 		$(PY) $(SCRIPTS)/env_tool.py restore-from-stdin
 	@echo "✅ .env restored from Key Vault."
 
 ##@ Storage
-.PHONY: create-storage
+.PHONY: az-create-storage
 # Usage: make create-storage env=<dev|prod|disaster> use=<web|functions|databricks> STORAGE_NAME=<name>
-create-storage: ## Create storage account (env=, use=, STORAGE_NAME=)
+az-create-storage: ## Create storage account (env=, use=, STORAGE_NAME=)
 	@if [ -z "$(env)" ] || [ -z "$(use)" ]; then \
 		echo "❌ env=<dev|prod|disaster> and use=<web|functions|databricks> are required"; exit 1; \
 	fi
@@ -183,9 +192,9 @@ endif
 	@echo "✅ Storage account '$(STORAGE_NAME)' created (env=$(env), use=$(use))."
 
 ##@ Function App
-.PHONY: create-funcapp create-funcapp-insights
+.PHONY: az-create-funcapp az-create-funcapp-insights
 # Usage: make create-funcapp env=<dev|prod> runtime=<node|dotnet|python>
-create-funcapp: ## Create Function App (env=, runtime=)
+az-create-funcapp: ## Create Function App (env=, runtime=)
 	@if [ -z "$(env)" ] || [ -z "$(runtime)" ]; then \
 		echo "❌ env=<dev|prod> and runtime=<node|dotnet|python> are required"; exit 1; \
 	fi
@@ -206,7 +215,7 @@ create-funcapp: ## Create Function App (env=, runtime=)
 	$(update_manifest)
 	@echo "✅ Function App '$(FUNC_NAME)' created (env=$(env), runtime=$(runtime))."
 
-create-funcapp-insights: ## Connect Function App to Application Insights
+az-create-funcapp-insights: ## Connect Function App to Application Insights
 	az functionapp config appsettings set \
 		--name $(FUNC_NAME) \
 		--resource-group $(RG_NAME) \
@@ -214,8 +223,8 @@ create-funcapp-insights: ## Connect Function App to Application Insights
 	@echo "✅ Function App '$(FUNC_NAME)' connected to App Insights '$(APP_INSIGHTS_NAME)'."
 
 ##@ Application Insights
-.PHONY: create-app-insights
-create-app-insights: ## Create Log Analytics workspace + Application Insights
+.PHONY: az-create-app-insights
+az-create-app-insights: ## Create Log Analytics workspace + Application Insights
 	az monitor log-analytics workspace create \
 		--resource-group $(RG_NAME) \
 		--workspace-name $(LOG_ANALYTICS_NAME) \
@@ -239,8 +248,8 @@ create-app-insights: ## Create Log Analytics workspace + Application Insights
 	@echo "✅ App Insights '$(APP_INSIGHTS_NAME)' created. Keys saved to .env."
 
 ##@ Entra ID (App Registration + Roles + Groups)
-.PHONY: create-app-reg create-app-roles create-api-groups assign-groups-to-roles
-create-app-reg: ## Create Entra ID app registration, save client ID
+.PHONY: az-create-app-reg az-create-app-roles az-create-api-groups az-assign-groups-to-roles
+az-create-app-reg: ## Create Entra ID app registration, save client ID
 	az ad app create --display-name $(APP_REG_NAME) >/dev/null
 	@$(PY) $(SCRIPTS)/env_tool.py set \
 		APP_REG_NAME=$(APP_REG_NAME) \
@@ -251,26 +260,26 @@ create-app-reg: ## Create Entra ID app registration, save client ID
 	$(update_manifest)
 	@echo "✅ App registration '$(APP_REG_NAME)' created."
 
-create-app-roles: ## Add Read/Write/Admin roles to app registration
+az-create-app-roles: ## Add Read/Write/Admin roles to app registration
 	@$(PY) $(SCRIPTS)/app_roles.py --standard --out .tmp-app-roles.json
 	az ad app update --id $(APIM_APP_CLIENT_ID) --app-roles @.tmp-app-roles.json
 	@rm -f .tmp-app-roles.json
 	@echo "✅ Roles API.Read, API.Write, API.Admin added to app registration."
 
-create-api-groups: ## Create AD groups (API-Readers, API-Writers, API-Admins)
+az-create-api-groups: ## Create AD groups (API-Readers, API-Writers, API-Admins)
 	az ad group create --display-name "API-Readers" --mail-nickname api-readers
 	az ad group create --display-name "API-Writers" --mail-nickname api-writers
 	az ad group create --display-name "API-Admins"  --mail-nickname api-admins
 	@echo "✅ Groups API-Readers, API-Writers, API-Admins created."
 
-assign-groups-to-roles: ## Assign AD groups to app roles
+az-assign-groups-to-roles: ## Assign AD groups to app roles
 	@$(PY) $(SCRIPTS)/assign_group_roles.py \
 		--client-id $(APIM_APP_CLIENT_ID) \
 		--pair "API-Readers:API.Read" "API-Writers:API.Write" "API-Admins:API.Admin"
 
 ##@ API Management
-.PHONY: create-apim apim-add-funcapp apim-restrict-funcapp apim-add-oauth apim-add-endpoint apim-rate-limit configure-cors create-health-probe
-create-apim: ## Create APIM instance and save gateway URL
+.PHONY: az-create-apim az-apim-add-funcapp az-apim-restrict-funcapp az-apim-add-oauth az-apim-add-endpoint az-apim-rate-limit az-configure-cors az-create-health-probe
+az-create-apim: ## Create APIM instance and save gateway URL
 	az apim create \
 		--name $(APIM_NAME) \
 		--resource-group $(RG_NAME) \
@@ -284,7 +293,7 @@ create-apim: ## Create APIM instance and save gateway URL
 	$(update_manifest)
 	@echo "✅ APIM '$(APIM_NAME)' created. Gateway URL saved to .env."
 
-apim-add-funcapp: ## Import Function App as API (requires swagger= URL or spec= file)
+az-apim-add-funcapp: ## Import Function App as API (requires swagger= URL or spec= file)
 	@if [ -n "$(spec)" ]; then \
 		az apim api import --resource-group $(RG_NAME) --service-name $(APIM_NAME) \
 			--api-id $(FUNC_NAME) --path /$(FUNC_NAME) \
@@ -298,7 +307,7 @@ apim-add-funcapp: ## Import Function App as API (requires swagger= URL or spec= 
 	fi
 	@echo "✅ Function App '$(FUNC_NAME)' added to APIM at /$(FUNC_NAME)."
 
-apim-restrict-funcapp: ## Restrict Function App to only accept traffic from APIM
+az-apim-restrict-funcapp: ## Restrict Function App to only accept traffic from APIM
 	az functionapp config access-restriction add \
 		--name $(FUNC_NAME) --resource-group $(RG_NAME) \
 		--priority 100 --service-tag AzureCloud \
@@ -308,7 +317,7 @@ apim-restrict-funcapp: ## Restrict Function App to only accept traffic from APIM
 		--default-action Deny
 	@echo "✅ Function App '$(FUNC_NAME)' restricted to APIM traffic only."
 
-apim-add-oauth: ## Validate JWT + require any of API.Read/Write/Admin
+az-apim-add-oauth: ## Validate JWT + require any of API.Read/Write/Admin
 	@$(PY) $(SCRIPTS)/apim_policy.py oauth \
 		--tenant-id $(TENANT_ID) \
 		--audience $(APIM_APP_CLIENT_ID) \
@@ -320,7 +329,7 @@ apim-add-oauth: ## Validate JWT + require any of API.Read/Write/Admin
 	@echo "✅ APIM '$(FUNC_NAME)' requires Entra ID token with API.Read/Write/Admin."
 
 # Usage: make apim-add-endpoint path=<api-path> role=<API.Read|API.Write|API.Admin> [method=GET]
-apim-add-endpoint: ## Add endpoint with role restriction (path=, role=, [method=])
+az-apim-add-endpoint: ## Add endpoint with role restriction (path=, role=, [method=])
 	$(eval method ?= GET)
 	@if [ -z "$(path)" ] || [ -z "$(role)" ]; then \
 		echo "❌ path=<api-path> and role=<API.Read|API.Write|API.Admin> are required"; exit 1; \
@@ -341,7 +350,7 @@ apim-add-endpoint: ## Add endpoint with role restriction (path=, role=, [method=
 	@rm -f .tmp-policy.xml
 	@echo "✅ Endpoint /$(path) added, restricted to role $(role)."
 
-apim-rate-limit: ## Rate-limit APIM API (calls=<N> period=<seconds>)
+az-apim-rate-limit: ## Rate-limit APIM API (calls=<N> period=<seconds>)
 	@if [ -z "$(calls)" ] || [ -z "$(period)" ]; then \
 		echo "❌ calls=<N> and period=<seconds> are required"; exit 1; \
 	fi
@@ -351,7 +360,7 @@ apim-rate-limit: ## Rate-limit APIM API (calls=<N> period=<seconds>)
 	@rm -f .tmp-policy.xml
 	@echo "✅ Rate limit set on API '$(FUNC_NAME)': $(calls) per $(period)s."
 
-configure-cors: ## Apply CORS + JWT policy to APIM API (origin=<url>)
+az-configure-cors: ## Apply CORS + JWT policy to APIM API (origin=<url>)
 	@if [ -z "$(origin)" ]; then echo "❌ origin=<url> is required"; exit 1; fi
 	@$(PY) $(SCRIPTS)/apim_policy.py cors \
 		--origin $(origin) \
@@ -364,7 +373,7 @@ configure-cors: ## Apply CORS + JWT policy to APIM API (origin=<url>)
 	@rm -f .tmp-policy.xml
 	@echo "✅ CORS configured for '$(origin)'."
 
-create-health-probe: ## Add /health endpoint to APIM
+az-create-health-probe: ## Add /health endpoint to APIM
 	az apim api operation create \
 		--resource-group $(RG_NAME) --service-name $(APIM_NAME) \
 		--api-id $(FUNC_NAME) --operation-id health \
@@ -372,8 +381,8 @@ create-health-probe: ## Add /health endpoint to APIM
 	@echo "✅ /health endpoint added."
 
 ##@ VNet & Private Endpoints
-.PHONY: create-vnet vnet-integrate-funcapp create-pe-storage create-pe-keyvault
-create-vnet: ## Create VNet with subnets for functions and private endpoints
+.PHONY: az-create-vnet az-vnet-integrate-funcapp az-create-pe-storage az-create-pe-keyvault
+az-create-vnet: ## Create VNet with subnets for functions and private endpoints
 	az network vnet create \
 		--name $(VNET_NAME) --resource-group $(RG_NAME) --location $(LOCATION) \
 		--address-prefix 10.0.0.0/16
@@ -388,12 +397,12 @@ create-vnet: ## Create VNet with subnets for functions and private endpoints
 	@echo "✅ VNet '$(VNET_NAME)' created with subnets."
 	$(update_manifest)
 
-vnet-integrate-funcapp: ## Integrate Function App with VNet
+az-vnet-integrate-funcapp: ## Integrate Function App with VNet
 	az functionapp vnet-integration add \
 		--name $(FUNC_NAME) --resource-group $(RG_NAME) \
 		--vnet $(VNET_NAME) --subnet $(SUBNET_FUNC)
 
-create-pe-storage: ## Private endpoint for storage
+az-create-pe-storage: ## Private endpoint for storage
 	@SA_ID=$$(az storage account show --name $(STORAGE_NAME) --resource-group $(RG_NAME) --query id -o tsv); \
 	az network private-endpoint create \
 		--name pe-$(STORAGE_NAME) --resource-group $(RG_NAME) \
@@ -401,7 +410,7 @@ create-pe-storage: ## Private endpoint for storage
 		--private-connection-resource-id "$$SA_ID" \
 		--group-id blob --connection-name pec-$(STORAGE_NAME)
 
-create-pe-keyvault: ## Private endpoint for Key Vault
+az-create-pe-keyvault: ## Private endpoint for Key Vault
 	@KV_ID=$$(az keyvault show --name $(KV_NAME) --resource-group $(RG_NAME) --query id -o tsv); \
 	az network private-endpoint create \
 		--name pe-$(KV_NAME) --resource-group $(RG_NAME) \
@@ -410,8 +419,8 @@ create-pe-keyvault: ## Private endpoint for Key Vault
 		--group-id vault --connection-name pec-$(KV_NAME)
 
 ##@ Front Door / CDN
-.PHONY: create-frontdoor add-custom-domain create-waf-policy
-create-frontdoor: ## Create Front Door pointing at static website of storage
+.PHONY: az-create-frontdoor az-add-custom-domain az-create-waf-policy
+az-create-frontdoor: ## Create Front Door pointing at static website of storage
 	az afd profile create \
 		--profile-name $(FRONTDOOR_NAME) --resource-group $(RG_NAME) \
 		--sku Standard_AzureFrontDoor
@@ -440,7 +449,7 @@ create-frontdoor: ## Create Front Door pointing at static website of storage
 	@echo "✅ Front Door '$(FRONTDOOR_NAME)' created."
 
 	$(update_manifest)
-add-custom-domain: ## (Optional) Add custom domain with managed TLS
+az-add-custom-domain: ## (Optional) Add custom domain with managed TLS
 	az afd custom-domain create \
 		--custom-domain-name $(subst .,-,$(CUSTOM_DOMAIN)) \
 		--profile-name $(FRONTDOOR_NAME) --resource-group $(RG_NAME) \
@@ -452,7 +461,7 @@ add-custom-domain: ## (Optional) Add custom domain with managed TLS
 	@echo "✅ Custom domain '$(CUSTOM_DOMAIN)' configured."
 	@echo "⚠️  Add CNAME: $(CUSTOM_DOMAIN) → $(FRONTDOOR_ENDPOINT)"
 
-create-waf-policy: ## Create WAF policy (default + bot protection)
+az-create-waf-policy: ## Create WAF policy (default + bot protection)
 	az network front-door waf-policy create \
 		--name $(WAF_POLICY_NAME) --resource-group $(RG_NAME) \
 		--sku Standard_AzureFrontDoor --mode Prevention
@@ -465,8 +474,8 @@ create-waf-policy: ## Create WAF policy (default + bot protection)
 	@echo "✅ WAF policy '$(WAF_POLICY_NAME)' created."
 
 ##@ Diagnostics & Alerts
-.PHONY: create-diagnostics create-budget
-create-diagnostics: ## Ship APIM + Function App logs to Log Analytics
+.PHONY: az-create-diagnostics az-create-budget
+az-create-diagnostics: ## Ship APIM + Function App logs to Log Analytics
 	@WS_ID=$$(az monitor log-analytics workspace show --resource-group $(RG_NAME) --workspace-name $(LOG_ANALYTICS_NAME) --query id -o tsv); \
 	APIM_ID=$$(az apim show --name $(APIM_NAME) --resource-group $(RG_NAME) --query id -o tsv); \
 	FUNC_ID=$$(az functionapp show --name $(FUNC_NAME) --resource-group $(RG_NAME) --query id -o tsv); \
@@ -478,7 +487,7 @@ create-diagnostics: ## Ship APIM + Function App logs to Log Analytics
 		--metrics '[{"category":"AllMetrics","enabled":true}]'
 	@echo "✅ Diagnostic settings enabled."
 
-create-budget: ## Monthly budget with 80%/100% alerts (BUDGET_AMOUNT=, BUDGET_EMAIL=)
+az-create-budget: ## Monthly budget with 80%/100% alerts (BUDGET_AMOUNT=, BUDGET_EMAIL=)
 	@START=$$($(PY) $(SCRIPTS)/budget_helper.py start-date); \
 	END=$$($(PY) $(SCRIPTS)/budget_helper.py end-date --years 1); \
 	NOTIF=$$($(PY) $(SCRIPTS)/budget_helper.py notifications --email $(BUDGET_EMAIL) --thresholds 80 100); \
@@ -490,8 +499,8 @@ create-budget: ## Monthly budget with 80%/100% alerts (BUDGET_AMOUNT=, BUDGET_EM
 	@echo "✅ Budget '$(BUDGET_NAME)' created: \$$$(BUDGET_AMOUNT)/month."
 
 ##@ Service Bus
-.PHONY: create-servicebus create-servicebus-queue
-create-servicebus: ## Create Service Bus namespace (env=dev|prod)
+.PHONY: az-create-servicebus az-create-servicebus-queue
+az-create-servicebus: ## Create Service Bus namespace (env=dev|prod)
 	@if [ -z "$(env)" ]; then echo "❌ env=<dev|prod> is required"; exit 1; fi
 	az servicebus namespace create \
 		--name $(SERVICEBUS_NAME) --resource-group $(RG_NAME) --location $(LOCATION) \
@@ -500,12 +509,12 @@ create-servicebus: ## Create Service Bus namespace (env=dev|prod)
 		SERVICEBUS_NAME=$(SERVICEBUS_NAME) \
 		SERVICEBUS_CONN=$$(az servicebus namespace authorization-rule keys list --namespace-name $(SERVICEBUS_NAME) --resource-group $(RG_NAME) --name RootManageSharedAccessKey --query primaryConnectionString -o tsv)
 
-create-servicebus-queue: ## Create a queue (n=<queue-name>)
+az-create-servicebus-queue: ## Create a queue (n=<queue-name>)
 	az servicebus queue create --name $(n) --namespace-name $(SERVICEBUS_NAME) --resource-group $(RG_NAME)
 
 ##@ Cosmos DB
-.PHONY: create-cosmosdb create-cosmosdb-container
-create-cosmosdb: ## Create Cosmos DB account + database (env=dev|prod)
+.PHONY: az-create-cosmosdb az-create-cosmosdb-container
+az-create-cosmosdb: ## Create Cosmos DB account + database (env=dev|prod)
 	@if [ -z "$(env)" ]; then echo "❌ env=<dev|prod> is required"; exit 1; fi
 	az cosmosdb create \
 		--name $(COSMOS_NAME) --resource-group $(RG_NAME) \
@@ -519,14 +528,14 @@ create-cosmosdb: ## Create Cosmos DB account + database (env=dev|prod)
 		COSMOS_DB_NAME=$(COSMOS_DB_NAME) \
 		COSMOS_CONN=$$(az cosmosdb keys list --name $(COSMOS_NAME) --resource-group $(RG_NAME) --type connection-strings --query 'connectionStrings[0].connectionString' -o tsv)
 
-create-cosmosdb-container: ## Create Cosmos DB container (n=<name>, pk=<partition-key>)
+az-create-cosmosdb-container: ## Create Cosmos DB container (n=<name>, pk=<partition-key>)
 	az cosmosdb sql container create \
 		--account-name $(COSMOS_NAME) --resource-group $(RG_NAME) \
 		--database-name $(COSMOS_DB_NAME) --name $(n) --partition-key-path "/$(pk)"
 
 ##@ Redis / SQL
-.PHONY: create-redis create-sql
-create-redis: ## Create Redis Cache (env=dev|prod)
+.PHONY: az-create-redis az-create-sql
+az-create-redis: ## Create Redis Cache (env=dev|prod)
 	@if [ -z "$(env)" ]; then echo "❌ env=<dev|prod> is required"; exit 1; fi
 	az redis create \
 		--name $(REDIS_NAME) --resource-group $(RG_NAME) --location $(LOCATION) \
@@ -536,7 +545,7 @@ create-redis: ## Create Redis Cache (env=dev|prod)
 		REDIS_NAME=$(REDIS_NAME) \
 		REDIS_CONN=$$(az redis list-keys --name $(REDIS_NAME) --resource-group $(RG_NAME) --query primaryKey -o tsv)
 
-create-sql: ## Create Azure SQL server + database (env=dev|prod)
+az-create-sql: ## Create Azure SQL server + database (env=dev|prod)
 	@if [ -z "$(env)" ]; then echo "❌ env=<dev|prod> is required"; exit 1; fi
 	@PW=$$(openssl rand -base64 24); \
 	az sql server create --name $(SQL_SERVER_NAME) --resource-group $(RG_NAME) --location $(LOCATION) \
@@ -554,8 +563,8 @@ create-sql: ## Create Azure SQL server + database (env=dev|prod)
 
 ##@ Event Grid
 	$(update_manifest)
-.PHONY: create-eventgrid-sub
-create-eventgrid-sub: ## Blob events → Function App (n=<subscription-name>)
+.PHONY: az-create-eventgrid-sub
+az-create-eventgrid-sub: ## Blob events → Function App (n=<subscription-name>)
 	@if [ -z "$(n)" ]; then echo "❌ n=<subscription-name> (and function name) is required"; exit 1; fi
 	@SA_ID=$$(az storage account show --name $(STORAGE_NAME) --resource-group $(RG_NAME) --query id -o tsv); \
 	FN_ID=$$(az functionapp show --name $(FUNC_NAME) --resource-group $(RG_NAME) --query id -o tsv); \
@@ -565,8 +574,8 @@ create-eventgrid-sub: ## Blob events → Function App (n=<subscription-name>)
 		--included-event-types Microsoft.Storage.BlobCreated Microsoft.Storage.BlobDeleted
 
 ##@ Managed Identity & Service Principal
-.PHONY: assign-func-roles create-sp-cicd
-assign-func-roles: ## Grant Function App identity access to Storage/SB/KV/Cosmos
+.PHONY: az-assign-func-roles az-create-sp-cicd
+az-assign-func-roles: ## Grant Function App identity access to Storage/SB/KV/Cosmos
 	@FUNC_PID=$$(az functionapp show --name $(FUNC_NAME) --resource-group $(RG_NAME) --query identity.principalId -o tsv); \
 	SA_ID=$$(az storage account show --name $(STORAGE_NAME) --resource-group $(RG_NAME) --query id -o tsv); \
 	SB_ID=$$(az servicebus namespace show --name $(SERVICEBUS_NAME) --resource-group $(RG_NAME) --query id -o tsv); \
@@ -579,7 +588,7 @@ assign-func-roles: ## Grant Function App identity access to Storage/SB/KV/Cosmos
 		--principal-id "$$FUNC_PID" --scope "/"
 	@echo "✅ Function App identity granted access to Storage/SB/KV/Cosmos."
 
-create-sp-cicd: ## Create service principal for CI/CD deployments
+az-create-sp-cicd: ## Create service principal for CI/CD deployments
 	@SP_JSON=$$(az ad sp create-for-rbac --name $(SP_NAME) --role Contributor \
 		--scopes /subscriptions/$(SUBSCRIPTION_ID)/resourceGroups/$(RG_NAME) -o json); \
 	CLIENT_ID=$$(echo "$$SP_JSON" | $(PY) -c 'import json,sys;print(json.load(sys.stdin)["appId"])'); \
@@ -589,26 +598,26 @@ create-sp-cicd: ## Create service principal for CI/CD deployments
 	@echo "✅ Service principal '$(SP_NAME)' created. Client secret stored in Key Vault 'sp-cicd-client-secret'."
 
 ##@ Deployment Slots
-.PHONY: create-slot swap-slot
+.PHONY: az-create-slot az-swap-slot
 	$(update_manifest)
-create-slot: ## Create a deployment slot (n=<slot-name>)
+az-create-slot: ## Create a deployment slot (n=<slot-name>)
 	az functionapp deployment slot create --name $(FUNC_NAME) --resource-group $(RG_NAME) --slot $(n)
 
-swap-slot: ## Swap deployment slot to production (n=<slot-name>)
+az-swap-slot: ## Swap deployment slot to production (n=<slot-name>)
 	az functionapp deployment slot swap --name $(FUNC_NAME) --resource-group $(RG_NAME) \
 		--slot $(n) --target-slot production
 
 ##@ Tags & Governance
-.PHONY: tag-rg assign-policies
+.PHONY: az-tag-rg az-assign-policies
 # Usage: make tag-rg env=<dev|prod|...>
-tag-rg: ## Tag the resource group and all resources (env=<value>)
+az-tag-rg: ## Tag the resource group and all resources (env=<value>)
 	@if [ -z "$(env)" ]; then echo "❌ env=<value> is required"; exit 1; fi
 	az group update --name $(RG_NAME) --tags env=$(env) $(TAGS)
 	@az resource list --resource-group $(RG_NAME) --query "[].id" -o tsv | while read id; do \
 		az resource tag --tags env=$(env) $(TAGS) --ids "$$id"; \
 	done
 
-assign-policies: ## Assign governance policies (tags, locations, key rotation)
+az-assign-policies: ## Assign governance policies (tags, locations, key rotation)
 	@RG_ID=$$(az group show --name $(RG_NAME) --query id -o tsv); \
 	TAG_POLICY=$$($(PY) $(SCRIPTS)/policy_defs.py resolve --alias required-tag-on-rg); \
 	LOC_POLICY=$$($(PY) $(SCRIPTS)/policy_defs.py resolve --alias allowed-locations); \
@@ -622,77 +631,25 @@ assign-policies: ## Assign governance policies (tags, locations, key rotation)
 	@echo "✅ Policies assigned (tag, location, key rotation)."
 
 ##@ Backup & Deploy
-.PHONY: create-backup-kv create-backup-storage deploy-funcapp deploy-web
-create-backup-kv: ## Back up all Key Vault secrets to .backups/keyvault/
+.PHONY: az-create-backup-kv az-create-backup-storage az-deploy-funcapp az-deploy-web
+az-create-backup-kv: ## Back up all Key Vault secrets to .backups/keyvault/
 	@mkdir -p .backups/keyvault
 	@az keyvault secret list --vault-name $(KV_NAME) --query '[].name' -o tsv | while read s; do \
 		az keyvault secret backup --vault-name $(KV_NAME) --name "$$s" --file ".backups/keyvault/$$s.bak"; \
 	done
 	@echo "✅ Key Vault secrets backed up."
 
-create-backup-storage: ## Enable blob soft delete + versioning on storage
+az-create-backup-storage: ## Enable blob soft delete + versioning on storage
 	az storage account blob-service-properties update \
 		--account-name $(STORAGE_NAME) --resource-group $(RG_NAME) \
 		--enable-delete-retention true --delete-retention-days 30 \
 		--enable-versioning true
 
-deploy-funcapp: ## Deploy function code (requires Azure Functions Core Tools)
+az-deploy-funcapp: ## Deploy function code (requires Azure Functions Core Tools)
 	func azure functionapp publish $(FUNC_NAME)
 
-deploy-web: ## Deploy React build to static website (dir=<build-folder>)
+az-deploy-web: ## Deploy React build to static website (dir=<build-folder>)
 	@if [ -z "$(dir)" ]; then echo "❌ dir=<build-folder> is required"; exit 1; fi
 	az storage blob upload-batch \
 		--account-name $(STORAGE_NAME) --destination '$$web' \
 		--source $(dir) --overwrite
-
-##@ Infisical Secrets Workflow
-# Requires: infisical CLI installed + logged in (infisical login)
-# Set INFISICAL_ENV to match your Infisical environment slug (dev/staging/prod)
-INFISICAL_SYNC    := python3 ../scripts/infisical_sync.py
-INFISICAL_ENV     ?= dev
-INFISICAL_PREFIX  ?=
-
-INFISICAL_URL     ?= http://localhost:9999/api
-
-# Internal: auto-update manifest if infisical is available
-define update_manifest
-	@if command -v infisical >/dev/null 2>&1; then \
-		$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.example 2>/dev/null || true; \
-	fi
-endef
-
-.PHONY: push-env pull-secrets push-secrets export-secrets generate-manifest login-secrets setup-secrets
-push-env: ## Push .env key/value pairs to Infisical
-	@while IFS='=' read -r key value; do \
-		[ -z "$$key" ] || [ "$${key#\#}" != "$$key" ] && continue; \
-		infisical secrets set "$$key=$$value" --env $(INFISICAL_ENV)  --domain $(INFISICAL_URL) --silent; \
-		echo "  ✓ $$key"; \
-	done < .env
-	@echo "✅ .env pushed to Infisical project  ($(INFISICAL_ENV))."
-
-login-secrets: ## Log in to Infisical CLI (opens browser)
-	infisical login --domain $(INFISICAL_URL)
-
-setup-secrets: 
-	infisical init --domain $(INFISICAL_URL)
-
-purge-secrets: ## Delete all secrets from Infisical project environment
-	@infisical secrets --env $(INFISICAL_ENV) --domain $(INFISICAL_URL) --plain -o json 2>/dev/null | \
-		$(PY) -c "import sys,json;[print(s['secretKey']) for s in json.loads(sys.stdin.read())]" | \
-		while read -r key; do \
-			infisical secrets delete "$$key" --env $(INFISICAL_ENV) --domain $(INFISICAL_URL) --type shared --silent; \
-			echo "  🗑 $$key"; \
-		done
-	@echo "✅ All secrets purged from Infisical ($(INFISICAL_ENV))."
-
-pull-secrets: ## Pull secrets from Azure Key Vault → Infisical (env=dev|staging|prod)
-	@$(INFISICAL_SYNC) pull --provider azure --vault-name $(KV_NAME) --env $(INFISICAL_ENV)
-
-push-secrets: ## Push secrets from Infisical → Azure Key Vault (env=dev|staging|prod)
-	@$(INFISICAL_SYNC) push --provider azure --vault-name $(KV_NAME) --env $(INFISICAL_ENV)
-
-export-secrets: ## Export Infisical secrets to stdout (for eval or piping)
-	@$(INFISICAL_SYNC) export --env $(INFISICAL_ENV) --format dotenv
-
-generate-manifest: ## Generate infisical.example (secret names only, no values)
-	@$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.examp
