@@ -16,6 +16,7 @@
 **/output_scripts
 **/schema_export
 **/.env
+**/.infisical.json
 
 **/node_modules
 

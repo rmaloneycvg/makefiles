@@ -1,3 +1,13 @@
+# ====================================================================
+# Git Workflow Makefile
+# Requires: git, kiro-cli (for git-commit), gh CLI (for git-release)
+# ====================================================================
+
+PY             ?= python3
+SCRIPTS_DIR    ?= $(HOME)/workspace/makefiles/scripts
+GIT_SQUASH     ?= $(SCRIPTS_DIR)/git_squash.py
+GIT_RESOLVE_WS ?= $(SCRIPTS_DIR)/git_resolve_whitespace.py
+
 .PHONY: git-compare
 
 # Default branch is main
@@ -30,12 +40,12 @@ git-changed-branch: ## lists all files changed in this branch vs main
 git-changed: ## lists uncommitted files
 	@git status --short
 
-BASE_MSG ?= "Squashed commits"
+BASE_MSG ?= Squashed commits
 k ?= 1
 
 .PHONY: git-squash
 git-squash: ## Squash current branch onto target branch
-	@python3 ~/workspace/scripts/git_squash.py \
+	@$(PY) $(GIT_SQUASH) \
 		--target-branch "$(if $(b),$(b),main)" \
 		$(if $(n),--num-commits "$(n)") \
 		$(if $(m),--message "$(m)") \
@@ -45,7 +55,7 @@ git-squash: ## Squash current branch onto target branch
 SIDE ?= theirs
 .PHONY: resolve-whitespace
 resolve-whitespace: ## Auto-resolves whitespace conflicts.
-	@python3 ~/workspace/scripts/resolve_whitespace.py --side $(SIDE)
+	@$(PY) $(GIT_RESOLVE_WS) --side $(SIDE)
 
 .PHONY: git-commit
 git-commit: ## Commit only staged changes with an AI-generated message
@@ -72,4 +82,3 @@ git-release: ## Merge MAINBRANCH → RELEASEBRANCH and create a GitHub release |
 	gh api "workspace/{owner}/{repo}/merges" -f base="$$DST" -f head="$$SRC" -f commit_message="Release $(v)" && \
 	gh release create "$(v)" --target "$$DST" --title "$(v)" --generate-notes && \
 	echo "Release $(v) created on $$DST with changes from $$SRC."
-

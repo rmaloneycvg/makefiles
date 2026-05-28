@@ -1,0 +1,8 @@
+#!/bin/bash
+echo "infisical $*" >> "${MOCK_LOG:-/tmp/mock_commands.log}"
+case "$*" in
+  *"--plain"*"-o json"*|*"--output json"*) echo '[]' ;;
+  *"export"*) echo 'export MOCK_KEY="mock_value"' ;;
+  *) echo "ok" ;;
+esac
+exit 0

@@ -1,17 +1,31 @@
+# ====================================================================
 # AWS Infrastructure Makefile
 # Equivalent to Azure infrastructure automation using AWS CLI
 #
 # Usage: make <target> [VARIABLE=value]
 # Run `make help` for available targets.
+# ====================================================================
 
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
-ENV_TOOL := python3 scripts/env_tool.py
-ENV_GET := python3 scripts/env_tool.py get
-BUDGET_HELPER := python3 scripts/budget_helper.py
-API_GW_POLICY := python3 scripts/api_gw_policy.py
-COGNITO_ROLES := python3 scripts/cognito_roles.py
-LAMBDA_ROUTING := python3 scripts/lambda_routing.py
+
+PY             ?= python3
+SCRIPTS_DIR    ?= $(HOME)/workspace/makefiles/aws/scripts
+ENV_TOOL       ?= $(PY) $(SCRIPTS_DIR)/env_tool.py
+ENV_GET        ?= $(PY) $(SCRIPTS_DIR)/env_tool.py get
+BUDGET_HELPER  ?= $(PY) $(SCRIPTS_DIR)/budget_helper.py
+API_GW_POLICY  ?= $(PY) $(SCRIPTS_DIR)/api_gw_policy.py
+COGNITO_ROLES  ?= $(PY) $(SCRIPTS_DIR)/cognito_roles.py
+LAMBDA_ROUTING ?= $(PY) $(SCRIPTS_DIR)/lambda_routing.py
+INFISICAL_SYNC ?= $(PY) $(HOME)/workspace/makefiles/scripts/infisical_sync.py
+INFISICAL_ENV  ?= dev
+
+# Auto-update infisical.example manifest after changes
+define update_manifest
+	@if command -v infisical >/dev/null 2>&1; then \
+		$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.example 2>/dev/null || true; \
+	fi
+endef
 
 # Load .env if present
 -include .env
@@ -55,16 +69,16 @@ help: ## Show this help
 
 ##@ Account & Tags
 
-.PHONY: show-account
-show-account: ## Show current AWS account info and save to .env
+.PHONY: aws-show-account
+aws-show-account: ## Show current AWS account info and save to .env
 	$(eval ACCOUNT_ID := $(shell aws sts get-caller-identity --query Account --output text))
 	$(eval REGION := $(shell aws configure get region || echo $(AWS_REGION)))
 	@echo "Account: $(ACCOUNT_ID) | Region: $(REGION)"
 	@$(ENV_TOOL) set ACCOUNT_ID=$(ACCOUNT_ID)
 	@$(ENV_TOOL) set AWS_REGION=$(REGION)
 
-.PHONY: tag-resources
-tag-resources: ## Tag all resources with project tag (requires: env=<value>)
+.PHONY: aws-tag-resources
+aws-tag-resources: ## Tag all resources with project tag (requires: env=<value>)
 ifndef env
 	$(error env is required: make tag-resources env=dev|prod)
 endif
@@ -79,8 +93,8 @@ endif
 		done
 	@echo "✓ Tagged all project resources with Environment=$(env)"
 
-.PHONY: list-resources
-list-resources: ## List all resources with project tag
+.PHONY: aws-list-resources
+aws-list-resources: ## List all resources with project tag
 	@aws resourcegroupstaggingapi get-resources \
 		--tag-filters Key=Project,Values=$(PROJECT_TAG) \
 		--query 'ResourceTagMappingList[].[ResourceARN,Tags[?Key==`Environment`].Value|[0]]' \
@@ -89,8 +103,8 @@ list-resources: ## List all resources with project tag
 
 ##@ Secrets Manager
 
-.PHONY: create-secret
-create-secret: ## Create a secret (requires: n=<name> v=<value>)
+.PHONY: aws-create-secret
+aws-create-secret: ## Create a secret (requires: n=<name> v=<value>)
 ifndef n
 	$(error n is required: make create-secret n=my-secret v=my-value)
 endif
@@ -104,14 +118,14 @@ endif
 		--region $(AWS_REGION)
 	@echo "✓ Created secret: $(n)"
 
-.PHONY: list-secrets
-list-secrets: ## List all secrets
+.PHONY: aws-list-secrets
+aws-list-secrets: ## List all secrets
 	@aws secretsmanager list-secrets \
 		--query 'SecretList[].[Name,CreatedDate]' \
 		--output table --region $(AWS_REGION)
 
-.PHONY: show-secret
-show-secret: ## Show secret value (requires: n=<name>)
+.PHONY: aws-show-secret
+aws-show-secret: ## Show secret value (requires: n=<name>)
 ifndef n
 	$(error n is required: make show-secret n=my-secret)
 endif
@@ -119,8 +133,8 @@ endif
 		--secret-id "$(n)" \
 		--query SecretString --output text --region $(AWS_REGION)
 
-.PHONY: update-secret
-update-secret: ## Update a secret (requires: n=<name> v=<value>)
+.PHONY: aws-update-secret
+aws-update-secret: ## Update a secret (requires: n=<name> v=<value>)
 ifndef n
 	$(error n is required)
 endif
@@ -132,8 +146,8 @@ endif
 		--secret-string "$(v)" --region $(AWS_REGION)
 	@echo "✓ Updated secret: $(n)"
 
-.PHONY: delete-secret
-delete-secret: ## Delete a secret with recovery window (requires: n=<name>)
+.PHONY: aws-delete-secret
+aws-delete-secret: ## Delete a secret with recovery window (requires: n=<name>)
 ifndef n
 	$(error n is required: make delete-secret n=my-secret)
 endif
@@ -142,8 +156,8 @@ endif
 		--recovery-window-in-days 30 --region $(AWS_REGION)
 	@echo "✓ Scheduled deletion: $(n) (30-day recovery)"
 
-.PHONY: purge-secret
-purge-secret: ## Force delete secret immediately (requires: n=<name>)
+.PHONY: aws-purge-secret
+aws-purge-secret: ## Force delete secret immediately (requires: n=<name>)
 ifndef n
 	$(error n is required)
 endif
@@ -154,8 +168,8 @@ endif
 
 ##@ KMS Keys
 
-.PHONY: create-kms-key
-create-kms-key: ## Create a KMS key (requires: n=<alias>)
+.PHONY: aws-create-kms-key
+aws-create-kms-key: ## Create a KMS key (requires: n=<alias>)
 ifndef n
 	$(error n is required: make create-kms-key n=my-key)
 endif
@@ -170,14 +184,14 @@ endif
 	$(update_manifest)
 	@echo "✓ Created KMS key: alias/$(n) ($(KEY_ID))"
 
-.PHONY: list-kms-keys
-list-kms-keys: ## List KMS key aliases
+.PHONY: aws-list-kms-keys
+aws-list-kms-keys: ## List KMS key aliases
 	@aws kms list-aliases \
 		--query 'Aliases[?starts_with(AliasName,`alias/`)].[AliasName,TargetKeyId]' \
 		--output table --region $(AWS_REGION)
 
-.PHONY: delete-kms-key
-delete-kms-key: ## Schedule KMS key deletion (requires: n=<alias>)
+.PHONY: aws-delete-kms-key
+aws-delete-kms-key: ## Schedule KMS key deletion (requires: n=<alias>)
 ifndef n
 	$(error n is required)
 endif
@@ -188,8 +202,8 @@ endif
 
 ##@ .env Backup/Restore
 
-.PHONY: backup-env
-backup-env: ## Backup .env to Secrets Manager
+.PHONY: aws-backup-env
+aws-backup-env: ## Backup .env to Secrets Manager
 	@aws secretsmanager create-secret \
 		--name "env-backup-$(PROJECT_TAG)" \
 		--secret-string file://.env \
@@ -200,8 +214,8 @@ backup-env: ## Backup .env to Secrets Manager
 		--secret-string file://.env --region $(AWS_REGION)
 	@echo "✓ Backed up .env to Secrets Manager"
 
-.PHONY: restore-env
-restore-env: ## Restore .env from Secrets Manager
+.PHONY: aws-restore-env
+aws-restore-env: ## Restore .env from Secrets Manager
 	@aws secretsmanager get-secret-value \
 		--secret-id "env-backup-$(PROJECT_TAG)" \
 		--query SecretString --output text --region $(AWS_REGION) | \
@@ -210,8 +224,8 @@ restore-env: ## Restore .env from Secrets Manager
 
 ##@ S3 Storage
 
-.PHONY: create-s3
-create-s3: ## Create S3 bucket (requires: BUCKET_NAME, env=dev|prod|disaster, use=web|lambda|data)
+.PHONY: aws-create-s3
+aws-create-s3: ## Create S3 bucket (requires: BUCKET_NAME, env=dev|prod|disaster, use=web|lambda|data)
 ifndef BUCKET_NAME
 	$(error BUCKET_NAME is required)
 endif
@@ -246,8 +260,8 @@ endif
 	$(update_manifest)
 	@echo "✓ Created S3 bucket: $(BUCKET_NAME) (env=$(env), use=$(use))"
 
-.PHONY: delete-s3
-delete-s3: ## Delete S3 bucket and contents (requires: BUCKET_NAME)
+.PHONY: aws-delete-s3
+aws-delete-s3: ## Delete S3 bucket and contents (requires: BUCKET_NAME)
 ifndef BUCKET_NAME
 	$(error BUCKET_NAME is required)
 endif
@@ -257,8 +271,8 @@ endif
 
 ##@ Lambda Functions
 
-.PHONY: create-lambda-role
-create-lambda-role: ## Create Lambda execution IAM role (requires: LAMBDA_ROLE_NAME)
+.PHONY: aws-create-lambda-role
+aws-create-lambda-role: ## Create Lambda execution IAM role (requires: LAMBDA_ROLE_NAME)
 ifndef LAMBDA_ROLE_NAME
 	$(error LAMBDA_ROLE_NAME is required)
 endif
@@ -277,8 +291,8 @@ endif
 	$(update_manifest)
 	@echo "✓ Created Lambda role: $(LAMBDA_ROLE_NAME) ($(ROLE_ARN))"
 
-.PHONY: create-lambda
-create-lambda: ## Create Lambda function (requires: FUNC_NAME, runtime=python3.12|nodejs20.x|dotnet8, LAMBDA_ROLE_NAME)
+.PHONY: aws-create-lambda
+aws-create-lambda: ## Create Lambda function (requires: FUNC_NAME, runtime=python3.12|nodejs20.x|dotnet8, LAMBDA_ROLE_NAME)
 ifndef FUNC_NAME
 	$(error FUNC_NAME is required)
 endif
@@ -305,8 +319,8 @@ endif
 	$(update_manifest)
 	@echo "✓ Created Lambda: $(FUNC_NAME)"
 
-.PHONY: deploy-lambda
-deploy-lambda: ## Deploy Lambda code from zip (requires: FUNC_NAME)
+.PHONY: aws-deploy-lambda
+aws-deploy-lambda: ## Deploy Lambda code from zip (requires: FUNC_NAME)
 ifndef FUNC_NAME
 	$(error FUNC_NAME is required)
 endif
@@ -316,8 +330,8 @@ endif
 		--region $(AWS_REGION)
 	@echo "✓ Deployed code to: $(FUNC_NAME)"
 
-.PHONY: create-lambda-alias
-create-lambda-alias: ## Create Lambda alias for blue/green (requires: FUNC_NAME, n=<alias>)
+.PHONY: aws-create-lambda-alias
+aws-create-lambda-alias: ## Create Lambda alias for blue/green (requires: FUNC_NAME, n=<alias>)
 ifndef FUNC_NAME
 	$(error FUNC_NAME is required)
 endif
@@ -332,8 +346,8 @@ endif
 		--region $(AWS_REGION)
 	@echo "✓ Created alias $(n) → version $(VERSION)"
 
-.PHONY: shift-traffic
-shift-traffic: ## Shift traffic between Lambda versions (requires: FUNC_NAME, n=<alias>, weight=<0-100>)
+.PHONY: aws-shift-traffic
+aws-shift-traffic: ## Shift traffic between Lambda versions (requires: FUNC_NAME, n=<alias>, weight=<0-100>)
 ifndef FUNC_NAME
 	$(error FUNC_NAME is required)
 endif
@@ -357,8 +371,8 @@ endif
 
 ##@ Cognito Auth
 
-.PHONY: create-user-pool
-create-user-pool: ## Create Cognito User Pool (requires: POOL_NAME)
+.PHONY: aws-create-user-pool
+aws-create-user-pool: ## Create Cognito User Pool (requires: POOL_NAME)
 ifndef POOL_NAME
 	$(error POOL_NAME is required)
 endif
@@ -373,8 +387,8 @@ endif
 	$(update_manifest)
 	@echo "✓ Created User Pool: $(POOL_NAME) ($(POOL_ID))"
 
-.PHONY: create-user-pool-client
-create-user-pool-client: ## Create User Pool app client (requires: CLIENT_NAME; optional: callback=<url> logout=<url>)
+.PHONY: aws-create-user-pool-client
+aws-create-user-pool-client: ## Create User Pool app client (requires: CLIENT_NAME; optional: callback=<url> logout=<url>)
 ifndef CLIENT_NAME
 	$(error CLIENT_NAME is required)
 endif
@@ -404,8 +418,8 @@ endif
 	$(update_manifest)
 	echo "✓ Created app client: $(CLIENT_NAME) ($$CLIENT_ID)"
 
-.PHONY: create-user-pool-domain
-create-user-pool-domain: ## Create hosted UI domain (requires: DOMAIN_PREFIX)
+.PHONY: aws-create-user-pool-domain
+aws-create-user-pool-domain: ## Create hosted UI domain (requires: DOMAIN_PREFIX)
 ifndef DOMAIN_PREFIX
 	$(error DOMAIN_PREFIX is required)
 endif
@@ -417,14 +431,14 @@ endif
 	$(update_manifest)
 	@echo "✓ Created domain: $(DOMAIN_PREFIX).auth.$(AWS_REGION).amazoncognito.com"
 
-.PHONY: create-cognito-groups
-create-cognito-groups: ## Create standard groups (Reader, Writer, Admin)
+.PHONY: aws-create-cognito-groups
+aws-create-cognito-groups: ## Create standard groups (Reader, Writer, Admin)
 	$(eval POOL_ID := $(shell $(ENV_GET) COGNITO_POOL_ID))
 	@$(COGNITO_ROLES) create-groups --user-pool-id $(POOL_ID)
 	@echo "✓ Created Cognito groups"
 
-.PHONY: assign-user-group
-assign-user-group: ## Add user to group (requires: username=<email> group=<Reader|Writer|Admin>)
+.PHONY: aws-assign-user-group
+aws-assign-user-group: ## Add user to group (requires: username=<email> group=<Reader|Writer|Admin>)
 ifndef username
 	$(error username is required)
 endif
@@ -437,8 +451,8 @@ endif
 
 ##@ API Gateway
 
-.PHONY: create-api-gw
-create-api-gw: ## Create HTTP API Gateway (requires: API_NAME)
+.PHONY: aws-create-api-gw
+aws-create-api-gw: ## Create HTTP API Gateway (requires: API_NAME)
 ifndef API_NAME
 	$(error API_NAME is required)
 endif
@@ -451,8 +465,8 @@ endif
 	$(update_manifest)
 	@echo "✓ Created HTTP API: $(API_NAME) ($(API_ID))"
 
-.PHONY: api-gw-add-authorizer
-api-gw-add-authorizer: ## Add JWT authorizer pointing to Cognito
+.PHONY: aws-api-gw-add-authorizer
+aws-api-gw-add-authorizer: ## Add JWT authorizer pointing to Cognito
 	$(eval API_ID := $(shell $(ENV_GET) API_GW_ID))
 	$(eval POOL_ID := $(shell $(ENV_GET) COGNITO_POOL_ID))
 	$(eval CLIENT_ID := $(shell $(ENV_GET) COGNITO_CLIENT_ID))
@@ -474,8 +488,8 @@ api-gw-add-authorizer: ## Add JWT authorizer pointing to Cognito
 	$(update_manifest)
 	@echo "✓ Created JWT authorizer: $(AUTH_ID)"
 
-.PHONY: api-gw-add-lambda
-api-gw-add-lambda: ## Integrate Lambda with API Gateway (requires: FUNC_NAME, path=<route>, method=<GET|POST|...>)
+.PHONY: aws-api-gw-add-lambda
+aws-api-gw-add-lambda: ## Integrate Lambda with API Gateway (requires: FUNC_NAME, path=<route>, method=<GET|POST|...>)
 ifndef FUNC_NAME
 	$(error FUNC_NAME is required)
 endif
@@ -508,8 +522,8 @@ endif
 		--region $(AWS_REGION) 2>/dev/null || true
 	@echo "✓ Added route: $(method) $(path) → $(FUNC_NAME)"
 
-.PHONY: api-gw-deploy
-api-gw-deploy: ## Deploy API Gateway stage (requires: stage=<name>)
+.PHONY: aws-api-gw-deploy
+aws-api-gw-deploy: ## Deploy API Gateway stage (requires: stage=<name>)
 ifndef stage
 	$(error stage is required: make api-gw-deploy stage=prod)
 endif
@@ -527,8 +541,8 @@ endif
 	@echo "✓ Deployed stage: $(stage)"
 	@echo "  URL: https://$(API_ID).execute-api.$(AWS_REGION).amazonaws.com/$(stage)"
 
-.PHONY: api-gw-cors
-api-gw-cors: ## Configure CORS on API Gateway (requires: origin=<url>)
+.PHONY: aws-api-gw-cors
+aws-api-gw-cors: ## Configure CORS on API Gateway (requires: origin=<url>)
 ifndef origin
 	$(error origin is required: make api-gw-cors origin=https://example.com)
 endif
@@ -540,8 +554,8 @@ endif
 		--region $(AWS_REGION)
 	@echo "✓ Configured CORS for: $(origin)"
 
-.PHONY: api-gw-throttle
-api-gw-throttle: ## Set rate limiting (requires: rate=<req/s> burst=<N>)
+.PHONY: aws-api-gw-throttle
+aws-api-gw-throttle: ## Set rate limiting (requires: rate=<req/s> burst=<N>)
 ifndef rate
 	$(error rate is required)
 endif
@@ -559,8 +573,8 @@ endif
 
 ##@ VPC & Networking
 
-.PHONY: create-vpc
-create-vpc: ## Create VPC with public/private subnets (requires: VPC_NAME)
+.PHONY: aws-create-vpc
+aws-create-vpc: ## Create VPC with public/private subnets (requires: VPC_NAME)
 ifndef VPC_NAME
 	$(error VPC_NAME is required)
 endif
@@ -594,8 +608,8 @@ endif
 	@echo "  Public:  $(PUB_SUBNET)"
 	@echo "  Private: $(PRIV_SUBNET_1), $(PRIV_SUBNET_2)"
 
-.PHONY: create-vpc-endpoint
-create-vpc-endpoint: ## Create VPC endpoint for AWS service (requires: service=<s3|secretsmanager|dynamodb>)
+.PHONY: aws-create-vpc-endpoint
+aws-create-vpc-endpoint: ## Create VPC endpoint for AWS service (requires: service=<s3|secretsmanager|dynamodb>)
 ifndef service
 	$(error service is required: s3|secretsmanager|dynamodb|sqs)
 endif
@@ -621,8 +635,8 @@ endif
 	fi
 	@echo "✓ Created VPC endpoint for: $(service)"
 
-.PHONY: lambda-vpc-config
-lambda-vpc-config: ## Attach Lambda to VPC private subnets (requires: FUNC_NAME)
+.PHONY: aws-lambda-vpc-config
+aws-lambda-vpc-config: ## Attach Lambda to VPC private subnets (requires: FUNC_NAME)
 ifndef FUNC_NAME
 	$(error FUNC_NAME is required)
 endif
@@ -639,8 +653,8 @@ endif
 
 ##@ CloudFront & WAF
 
-.PHONY: create-cloudfront
-create-cloudfront: ## Create CloudFront distribution for S3 website (requires: BUCKET_NAME)
+.PHONY: aws-create-cloudfront
+aws-create-cloudfront: ## Create CloudFront distribution for S3 website (requires: BUCKET_NAME)
 ifndef BUCKET_NAME
 	$(error BUCKET_NAME is required)
 endif
@@ -656,8 +670,8 @@ endif
 	@echo "✓ Created CloudFront distribution: $(DIST_ID)"
 	@echo "  Domain: $(shell aws cloudfront get-distribution --id $(DIST_ID) --query Distribution.DomainName --output text)"
 
-.PHONY: create-waf
-create-waf: ## Create WAF WebACL with managed rules
+.PHONY: aws-create-waf
+aws-create-waf: ## Create WAF WebACL with managed rules
 	$(eval WAF_ARN := $(shell aws wafv2 create-web-acl \
 		--name $(PROJECT_TAG)-waf \
 		--scope CLOUDFRONT \
@@ -670,8 +684,8 @@ create-waf: ## Create WAF WebACL with managed rules
 	$(update_manifest)
 	@echo "✓ Created WAF WebACL: $(WAF_ARN)"
 
-.PHONY: attach-waf
-attach-waf: ## Attach WAF to CloudFront distribution
+.PHONY: aws-attach-waf
+aws-attach-waf: ## Attach WAF to CloudFront distribution
 	$(eval WAF_ARN := $(shell $(ENV_GET) WAF_ACL_ARN))
 	$(eval DIST_ARN := $(shell aws cloudfront get-distribution --id $(shell $(ENV_GET) CLOUDFRONT_DIST_ID) --query Distribution.ARN --output text))
 	@aws wafv2 associate-web-acl \
@@ -682,8 +696,8 @@ attach-waf: ## Attach WAF to CloudFront distribution
 
 ##@ Custom Domain (ACM + Route 53)
 
-.PHONY: request-cert
-request-cert: ## Request ACM certificate for custom domain (requires: DOMAIN; CloudFront certs must be in us-east-1)
+.PHONY: aws-request-cert
+aws-request-cert: ## Request ACM certificate for custom domain (requires: DOMAIN; CloudFront certs must be in us-east-1)
 ifndef DOMAIN
 	$(error DOMAIN is required)
 endif
@@ -699,8 +713,8 @@ endif
 	@echo "✓ Requested certificate: $(CERT_ARN)"
 	@echo "  Validate via DNS: aws acm describe-certificate --certificate-arn $(CERT_ARN) --region $(CERT_REGION) --query Certificate.DomainValidationOptions"
 
-.PHONY: validate-cert-route53
-validate-cert-route53: ## Create Route 53 validation records for ACM cert (requires: DOMAIN, HOSTED_ZONE_ID)
+.PHONY: aws-validate-cert-route53
+aws-validate-cert-route53: ## Create Route 53 validation records for ACM cert (requires: DOMAIN, HOSTED_ZONE_ID)
 ifndef DOMAIN
 	$(error DOMAIN is required)
 endif
@@ -718,8 +732,8 @@ endif
 		--change-batch "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$$NAME\",\"Type\":\"$$TYPE\",\"TTL\":300,\"ResourceRecords\":[{\"Value\":\"$$VALUE\"}]}}]}"
 	@echo "✓ Created Route 53 validation record. Cert will validate in a few minutes."
 
-.PHONY: attach-domain-cloudfront
-attach-domain-cloudfront: ## Attach custom domain + ACM cert to CloudFront distribution (requires: DOMAIN)
+.PHONY: aws-attach-domain-cloudfront
+aws-attach-domain-cloudfront: ## Attach custom domain + ACM cert to CloudFront distribution (requires: DOMAIN)
 ifndef DOMAIN
 	$(error DOMAIN is required)
 endif
@@ -735,8 +749,8 @@ endif
 	@echo "    Distribution: $(DIST_ID)"
 	@echo "    Domain alias to add: $(DOMAIN)"
 
-.PHONY: create-dns-alias
-create-dns-alias: ## Create Route 53 A-record alias pointing to CloudFront (requires: DOMAIN, HOSTED_ZONE_ID)
+.PHONY: aws-create-dns-alias
+aws-create-dns-alias: ## Create Route 53 A-record alias pointing to CloudFront (requires: DOMAIN, HOSTED_ZONE_ID)
 ifndef DOMAIN
 	$(error DOMAIN is required)
 endif
@@ -751,8 +765,8 @@ endif
 
 ##@ Monitoring & Logging
 
-.PHONY: create-log-group
-create-log-group: ## Create CloudWatch log group (requires: n=<name>)
+.PHONY: aws-create-log-group
+aws-create-log-group: ## Create CloudWatch log group (requires: n=<name>)
 ifndef n
 	$(error n is required)
 endif
@@ -766,8 +780,8 @@ endif
 		--region $(AWS_REGION)
 	@echo "✓ Created log group: $(n) (30-day retention)"
 
-.PHONY: enable-xray
-enable-xray: ## Enable X-Ray tracing on Lambda (requires: FUNC_NAME)
+.PHONY: aws-enable-xray
+aws-enable-xray: ## Enable X-Ray tracing on Lambda (requires: FUNC_NAME)
 ifndef FUNC_NAME
 	$(error FUNC_NAME is required)
 endif
@@ -777,8 +791,8 @@ endif
 		--region $(AWS_REGION)
 	@echo "✓ Enabled X-Ray on: $(FUNC_NAME)"
 
-.PHONY: create-alarm
-create-alarm: ## Create CloudWatch alarm (requires: FUNC_NAME, metric=<Errors|Duration|Throttles>)
+.PHONY: aws-create-alarm
+aws-create-alarm: ## Create CloudWatch alarm (requires: FUNC_NAME, metric=<Errors|Duration|Throttles>)
 ifndef FUNC_NAME
 	$(error FUNC_NAME is required)
 endif
@@ -803,8 +817,8 @@ endif
 
 ##@ DynamoDB
 
-.PHONY: create-dynamodb
-create-dynamodb: ## Create DynamoDB table (requires: TABLE_NAME, pk=<partition-key>, env=dev|prod)
+.PHONY: aws-create-dynamodb
+aws-create-dynamodb: ## Create DynamoDB table (requires: TABLE_NAME, pk=<partition-key>, env=dev|prod)
 ifndef TABLE_NAME
 	$(error TABLE_NAME is required)
 endif
@@ -834,8 +848,8 @@ endif
 	fi
 	@echo "✓ Created DynamoDB table: $(TABLE_NAME) (pk=$(pk), env=$(env))"
 
-.PHONY: delete-dynamodb
-delete-dynamodb: ## Delete DynamoDB table (requires: TABLE_NAME)
+.PHONY: aws-delete-dynamodb
+aws-delete-dynamodb: ## Delete DynamoDB table (requires: TABLE_NAME)
 ifndef TABLE_NAME
 	$(error TABLE_NAME is required)
 endif
@@ -844,8 +858,8 @@ endif
 
 ##@ SQS Queues
 
-.PHONY: create-sqs
-create-sqs: ## Create SQS queue (requires: n=<name>, env=dev|prod)
+.PHONY: aws-create-sqs
+aws-create-sqs: ## Create SQS queue (requires: n=<name>, env=dev|prod)
 ifndef n
 	$(error n is required)
 endif
@@ -867,8 +881,8 @@ endif
 	fi
 	@echo "✓ Created SQS queue: $(n) (env=$(env))"
 
-.PHONY: delete-sqs
-delete-sqs: ## Delete SQS queue (requires: n=<name>)
+.PHONY: aws-delete-sqs
+aws-delete-sqs: ## Delete SQS queue (requires: n=<name>)
 ifndef n
 	$(error n is required)
 endif
@@ -878,8 +892,8 @@ endif
 
 ##@ EventBridge
 
-.PHONY: create-eventbridge-rule
-create-eventbridge-rule: ## Create EventBridge rule for S3 events (requires: BUCKET_NAME, FUNC_NAME, n=<rule-name>)
+.PHONY: aws-create-eventbridge-rule
+aws-create-eventbridge-rule: ## Create EventBridge rule for S3 events (requires: BUCKET_NAME, FUNC_NAME, n=<rule-name>)
 ifndef n
 	$(error n is required)
 endif
@@ -910,8 +924,8 @@ endif
 
 ##@ RDS
 
-.PHONY: create-db-subnet-group
-create-db-subnet-group: ## Create RDS DB subnet group from existing private subnets (requires: DB_SUBNET_GROUP)
+.PHONY: aws-create-db-subnet-group
+aws-create-db-subnet-group: ## Create RDS DB subnet group from existing private subnets (requires: DB_SUBNET_GROUP)
 ifndef DB_SUBNET_GROUP
 	$(error DB_SUBNET_GROUP is required)
 endif
@@ -930,8 +944,8 @@ endif
 	$(update_manifest)
 	@echo "✓ Created DB subnet group: $(DB_SUBNET_GROUP)"
 
-.PHONY: create-cache-subnet-group
-create-cache-subnet-group: ## Create ElastiCache subnet group (requires: CACHE_SUBNET_GROUP)
+.PHONY: aws-create-cache-subnet-group
+aws-create-cache-subnet-group: ## Create ElastiCache subnet group (requires: CACHE_SUBNET_GROUP)
 ifndef CACHE_SUBNET_GROUP
 	$(error CACHE_SUBNET_GROUP is required)
 endif
@@ -949,8 +963,8 @@ endif
 	$(update_manifest)
 	@echo "✓ Created cache subnet group: $(CACHE_SUBNET_GROUP)"
 
-.PHONY: create-rds
-create-rds: ## Create RDS PostgreSQL instance (requires: DB_NAME, env=dev|prod, DB_SUBNET_GROUP)
+.PHONY: aws-create-rds
+aws-create-rds: ## Create RDS PostgreSQL instance (requires: DB_NAME, env=dev|prod, DB_SUBNET_GROUP)
 ifndef DB_NAME
 	$(error DB_NAME is required)
 endif
@@ -1000,8 +1014,8 @@ endif
 
 ##@ ElastiCache
 
-.PHONY: create-redis
-create-redis: ## Create ElastiCache Redis cluster (requires: REDIS_NAME, env=dev|prod, CACHE_SUBNET_GROUP)
+.PHONY: aws-create-redis
+aws-create-redis: ## Create ElastiCache Redis cluster (requires: REDIS_NAME, env=dev|prod, CACHE_SUBNET_GROUP)
 ifndef REDIS_NAME
 	$(error REDIS_NAME is required)
 endif
@@ -1040,8 +1054,8 @@ endif
 
 ##@ Budgets
 
-.PHONY: create-budget
-create-budget: ## Create monthly budget with alerts (requires: BUDGET_AMOUNT, BUDGET_EMAIL)
+.PHONY: aws-create-budget
+aws-create-budget: ## Create monthly budget with alerts (requires: BUDGET_AMOUNT, BUDGET_EMAIL)
 ifndef BUDGET_AMOUNT
 	$(error BUDGET_AMOUNT is required)
 endif
@@ -1059,8 +1073,8 @@ endif
 
 ##@ IAM Roles & Policies
 
-.PHONY: assign-lambda-policies
-assign-lambda-policies: ## Grant Lambda role access to DynamoDB/SQS/Secrets/S3 (requires: LAMBDA_ROLE_NAME)
+.PHONY: aws-assign-lambda-policies
+aws-assign-lambda-policies: ## Grant Lambda role access to DynamoDB/SQS/Secrets/S3 (requires: LAMBDA_ROLE_NAME)
 ifndef LAMBDA_ROLE_NAME
 	$(error LAMBDA_ROLE_NAME is required)
 endif
@@ -1078,8 +1092,8 @@ endif
 		--policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess
 	@echo "✓ Attached DynamoDB/SQS/Secrets/S3 policies to $(LAMBDA_ROLE_NAME)"
 
-.PHONY: create-cicd-user
-create-cicd-user: ## Create CI/CD IAM user with credentials stored in Secrets Manager (requires: CICD_USER)
+.PHONY: aws-create-cicd-user
+aws-create-cicd-user: ## Create CI/CD IAM user with credentials stored in Secrets Manager (requires: CICD_USER)
 ifndef CICD_USER
 	$(error CICD_USER is required)
 endif
@@ -1098,8 +1112,8 @@ endif
 
 ##@ Deployment
 
-.PHONY: deploy-web
-deploy-web: ## Deploy static site to S3 + invalidate CloudFront (requires: dir=<build-folder>, BUCKET_NAME)
+.PHONY: aws-deploy-web
+aws-deploy-web: ## Deploy static site to S3 + invalidate CloudFront (requires: dir=<build-folder>, BUCKET_NAME)
 ifndef dir
 	$(error dir is required: make deploy-web dir=./build BUCKET_NAME=x)
 endif
@@ -1116,8 +1130,8 @@ endif
 		echo "✓ Deployed to S3 (no CloudFront distribution found)"; \
 	fi
 
-.PHONY: backup-secrets
-backup-secrets: ## Backup all secrets to .backups/secrets/
+.PHONY: aws-backup-secrets
+aws-backup-secrets: ## Backup all secrets to .backups/secrets/
 	@mkdir -p .backups/secrets
 	@aws secretsmanager list-secrets \
 		--query 'SecretList[].Name' --output text --region $(AWS_REGION) | \
@@ -1133,25 +1147,16 @@ backup-secrets: ## Backup all secrets to .backups/secrets/
 ##@ Infisical Secrets Workflow
 # Requires: infisical CLI installed + logged in (infisical login)
 # Set INFISICAL_ENV to match your Infisical environment slug (dev/staging/prod)
-INFISICAL_SYNC := python3 ../scripts/infisical_sync.py
-INFISICAL_ENV  ?= dev
 
-# Internal: auto-update manifest if infisical is available
-define update_manifest
-	@if command -v infisical >/dev/null 2>&1; then \
-		$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.example 2>/dev/null || true; \
-	fi
-endef
-
-.PHONY: pull-secrets push-secrets export-secrets generate-manifest
-pull-secrets: ## Pull secrets from AWS Secrets Manager → Infisical (env=dev|staging|prod)
+.PHONY: aws-pull-secrets aws-push-secrets aws-export-secrets aws-generate-manifest
+aws-pull-secrets: ## Pull secrets from AWS Secrets Manager → Infisical (env=dev|staging|prod)
 	@$(INFISICAL_SYNC) pull --provider aws --region $(AWS_REGION) --env $(INFISICAL_ENV)
 
-push-secrets: ## Push secrets from Infisical → AWS Secrets Manager (env=dev|staging|prod)
+aws-push-secrets: ## Push secrets from Infisical → AWS Secrets Manager (env=dev|staging|prod)
 	@$(INFISICAL_SYNC) push --provider aws --region $(AWS_REGION) --env $(INFISICAL_ENV)
 
-export-secrets: ## Export Infisical secrets to stdout (for eval or piping)
+aws-export-secrets: ## Export Infisical secrets to stdout (for eval or piping)
 	@$(INFISICAL_SYNC) export --env $(INFISICAL_ENV) --format dotenv
 
-generate-manifest: ## Generate infisical.example (secret names only, no values)
+aws-generate-manifest: ## Generate infisical.example (secret names only, no values)
 	@$(INFISICAL_SYNC) manifest --env $(INFISICAL_ENV) --out infisical.example

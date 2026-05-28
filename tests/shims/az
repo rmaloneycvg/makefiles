@@ -1,0 +1,10 @@
+#!/bin/bash
+echo "az $*" >> "${MOCK_LOG:-/tmp/mock_commands.log}"
+# Return JSON for commands that need it
+case "$*" in
+  *"--query"*"-o tsv"*|*"--query"*"--output text"*) echo "mock-value" ;;
+  *"-o json"*|*"--output json"*) echo '[]' ;;
+  *"-o table"*|*"--output table"*) echo "mock-table-output" ;;
+  *) echo '{}' ;;
+esac
+exit 0

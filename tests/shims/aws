@@ -1,0 +1,9 @@
+#!/bin/bash
+echo "aws $*" >> "${MOCK_LOG:-/tmp/mock_commands.log}"
+case "$*" in
+  *"--query"*"--output text"*) echo "mock-value" ;;
+  *"--output json"*) echo '{}' ;;
+  *"--output table"*) echo "mock-table-output" ;;
+  *) echo "mock-value" ;;
+esac
+exit 0
