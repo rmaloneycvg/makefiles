@@ -1,13 +1,39 @@
 # Python-generated files
-__pycache__/
+**/__pycache__/
 *.py[oc]
-build/
-dist/
-wheels/
+
+**/build
+**/dist
+**/wheels
 *.egg-info
+*~
+*.swp
+*.swo
+
 
 # Virtual environments
-.venv
-output_scripts/
-schema_export/
+**/.venv
+**/output_scripts
+**/schema_export
 **/.env
+
+**/node_modules
+
+# testing
+**/coverage
+**/reports
+**/junit.xml
+
+**/.DS_Store
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor specific
+**/.vscode
+**/.idea
+**/.claude
+
+*.tgz
